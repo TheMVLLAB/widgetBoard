@@ -3,6 +3,8 @@ import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Eye, EyeOff
 import type { WidgetConfig, WidgetId, ChartDatum } from '../lib/config'
 import { localDay, storageAvailable, useStoredState } from '../lib/storage'
 import { dailyWordIndex, wordsForLevel } from '../data/words'
+import { ConnectedChartFrame } from '../features/connected/Connected'
+import type { ChartResponse } from '../features/connected/api'
 
 type Props = {id: WidgetId; config:WidgetConfig; embedded?:boolean}
 export function WidgetRenderer({id,config,embedded=false}:Props){
@@ -12,7 +14,7 @@ export function WidgetRenderer({id,config,embedded=false}:Props){
     {id==='focus-garden'&&<FocusGarden config={config}/>}
     {id==='habit-stamps'&&<HabitStamps config={config}/>}
     {id==='roulette'&&<Roulette config={config}/>}
-    {id==='mini-charts'&&<MiniCharts config={config}/>}
+    {id==='mini-charts'&&(config.chartSource==='notion'?<ConnectedChartFrame config={config} render={(result:ChartResponse)=><MiniCharts config={config} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
     {id==='smart-clock'&&<SmartClock config={config}/>}
   </div>
 }
@@ -138,30 +140,45 @@ function Roulette({config}:{config:WidgetConfig}){
 }
 function ChartDrawing({data,type,active,onSelect}:{data:ChartDatum[];type:WidgetConfig['chartType'];active:number;onSelect:(n:number)=>void}){
   const max=Math.max(...data.map(d=>d.value),1)
+  const min=Math.min(...data.map(d=>d.value),0)
+  const absMax=Math.max(Math.abs(min),Math.abs(max),1)
+  if(type==='donut' && data.some(d=>d.value<0))return <div className="connected-empty">음수 데이터는 도넛 차트에 표시할 수 없습니다. 막대 또는 꺾은선 차트를 선택해 주세요.</div>
   if(type==='donut'){
     const sum=data.reduce((a,v)=>a+v.value,0)
     let acc=0
     const gradient=data.map((d,i)=>{const a=acc;acc+=sum?d.value/sum*100:100/data.length;return `${COLORS[i%COLORS.length]} ${a}% ${acc}%`}).join(',')
     return <div className="donut-zone"><div className="donut-chart" style={{background:`conic-gradient(${gradient})`}}><div className="donut-hole"><strong>{data[active]?.value.toLocaleString()}</strong><span>{data[active]?.label}</span></div></div></div>
   }
+  if(type==='bar' && min<0){
+    return <div className="signed-chart" role="group" aria-label="음수 및 양수 막대 그래프">
+      {data.map((d,i)=><button key={i} className={`signed-column ${active===i?'bar-active':''}`} onClick={()=>onSelect(i)} aria-label={`${d.label}: ${d.value}`}>
+        <span className="signed-value">{active===i?d.value.toLocaleString():''}</span>
+        <span className="signed-track">
+          <span className="signed-positive" style={{height:d.value>0?`${d.value/absMax*48}%`:'0%',background:COLORS[i%COLORS.length]}}/>
+          <span className="signed-negative" style={{height:d.value<0?`${Math.abs(d.value)/absMax*48}%`:'0%',background:COLORS[i%COLORS.length]}}/>
+        </span>
+        <span className="bar-name">{d.label}</span>
+      </button>)}
+    </div>
+  }
   if(type==='line'){
-    const pts=data.map((d,i)=>({x:40+(i*(280/Math.max(1,data.length-1))),y:162-(d.value/max)*125}))
+    const pts=data.map((d,i)=>({x:40+(i*(280/Math.max(1,data.length-1))),y:162-((d.value-min)/Math.max(1,max-min))*125}))
     return <div className="line-chart"><svg viewBox="0 0 360 200" role="img" aria-label="선 그래프"><line x1="26" y1="163" x2="337" y2="163" stroke="currentColor" opacity=".2"/><line x1="26" y1="100" x2="337" y2="100" stroke="currentColor" opacity=".1"/>
       <polyline points={pts.map(p=>`${p.x},${p.y}`).join(' ')} stroke="var(--w-accent)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
       {pts.map((p,i)=><g key={i} role="button" tabIndex={0} onClick={()=>onSelect(i)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(i)}}} aria-label={`${data[i].label}: ${data[i].value}`}><circle cx={p.x} cy={p.y} r={active===i?8:5} fill={active===i?'#2b2b2b':'var(--w-accent)'} stroke="var(--w-bg)" strokeWidth="3"/><text x={p.x} y="187" textAnchor="middle" fontSize="12" fill="currentColor">{data[i].label.slice(0,5)}</text></g>)}
     </svg></div>
   }
-  return <div className="bar-chart" role="img" aria-label="막대 그래프">{data.map((d,i)=><button key={i} onClick={()=>onSelect(i)} className={`bar-item ${active===i?'bar-active':''}`} aria-label={`${d.label}: ${d.value}`}><span className="bar-value">{active===i?d.value.toLocaleString():''}</span><span className="bar-track"><span style={{height:`${Math.max(4,d.value/max*100)}%`,background:COLORS[i%COLORS.length]}}/></span><span className="bar-name">{d.label}</span></button>)}</div>
+  return <div className="bar-chart" role="img" aria-label="막대 그래프">{data.map((d,i)=><button key={i} onClick={()=>onSelect(i)} className={`bar-item ${active===i?'bar-active':''}`} aria-label={`${d.label}: ${d.value}`}><span className="bar-value">{active===i?d.value.toLocaleString():''}</span><span className="bar-track"><span style={{height:`${Math.max(4,Math.abs(d.value)/absMax*100)}%`,background:COLORS[i%COLORS.length],opacity:d.value<0?.65:1,border:d.value<0?'2px dashed #6e6777':'none'}}/></span><span className="bar-name">{d.label}</span></button>)}</div>
 }
-function MiniCharts({config}:{config:WidgetConfig}){
+function MiniCharts({config,connectedData}:{config:WidgetConfig;connectedData?:ChartDatum[]}){
   const [active,setActive]=useState(0)
-  const data=config.chartData
+  const data=connectedData||config.chartData
   const total=data.reduce((sum,d)=>sum+d.value,0)
   return <div className="widget-body chart-widget">
     <WidgetKicker name="MINI CHARTS" tag={config.chartType.toUpperCase()}/>
-    <div className="chart-title"><div><h3>이번 주의 기록</h3><span>나의 데이터를 한눈에</span></div><div className="chart-total"><strong>{total.toLocaleString()}</strong><span>TOTAL</span></div></div>
-    <ChartDrawing data={data} type={config.chartType} active={Math.min(active,data.length-1)} onSelect={setActive}/>
-    <div className="chart-details"><span className="chart-swatch" style={{background:COLORS[Math.min(active,data.length-1)%COLORS.length]}}/>{data[Math.min(active,data.length-1)].label}<strong>{data[Math.min(active,data.length-1)].value.toLocaleString()}</strong></div>
+    <div className="chart-title"><div><h3>{connectedData?'Notion 데이터 요약':'이번 주의 기록'}</h3><span>{connectedData?'읽기 전용 집계 결과':'나의 데이터를 한눈에'}</span></div><div className="chart-total"><strong>{total.toLocaleString()}</strong><span>TOTAL</span></div></div>
+    {data.length>0?<ChartDrawing data={data} type={config.chartType} active={Math.min(active,data.length-1)} onSelect={setActive}/>:<div className="connected-empty">조건에 맞는 데이터가 없습니다.</div>}
+    {data.length>0&&<div className="chart-details"><span className="chart-swatch" style={{background:COLORS[Math.min(active,data.length-1)%COLORS.length]}}/>{data[Math.min(active,data.length-1)].label}<strong>{data[Math.min(active,data.length-1)].value.toLocaleString()}</strong></div>}
     <span className="subtle-caption">각 항목을 클릭하면 해당 값을 확인할 수 있어요.</span>
   </div>
 }

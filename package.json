@@ -1,6 +1,6 @@
 {
   "name": "widget-playground",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,11 @@
     "build": "tsc -p tsconfig.app.json && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:worker": "node --experimental-strip-types --test worker/test/*.test.mjs",
+    "typecheck:worker": "tsc -p worker/tsconfig.json",
+    "worker:dev": "wrangler dev --config worker/wrangler.jsonc",
+    "worker:deploy": "wrangler deploy --config worker/wrangler.jsonc"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -22,6 +26,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "~5.7.3",
     "vite": "^6.0.5",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "wrangler": "^4.0.0"
   }
 }

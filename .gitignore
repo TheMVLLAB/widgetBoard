@@ -6,3 +6,7 @@ dist/
 coverage/
 .DS_Store
 .vite/
+
+.dev.vars
+worker/.dev.vars
+worker/node_modules

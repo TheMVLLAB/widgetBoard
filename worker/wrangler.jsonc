@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "widgetboard",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-12",
+  "workers_dev": true,
+  "secrets": {
+    "required": ["NOTION_TOKEN", "NOTION_SOURCES_JSON", "ADMIN_ACCESS_KEY", "SESSION_SECRET", "SITE_ORIGIN"]
+  },
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": false,
+      "head_sampling_rate": 1,
+      "persist": true
+    }
+  },
+}

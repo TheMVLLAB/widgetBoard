@@ -6,6 +6,25 @@ export type ChartType = 'bar'|'line'|'donut'
 export type ClockStyle = 'digital'|'analog'
 export type Level = 'easy' | 'medium' | 'advanced'
 export type ChartDatum = { label: string; value: number }
+export type ConnectedChartConfig = {
+  sourceKey: string; dateFieldId: string; valueFieldId: string; categoryFieldId: string;
+  groupBy: 'month' | 'day' | 'category'; aggregate: 'sum' | 'count' | 'avg';
+  dateFrom: string; dateTo: string
+}
+export const defaultConnectedChart: ConnectedChartConfig = {
+  sourceKey:'',dateFieldId:'',valueFieldId:'',categoryFieldId:'',groupBy:'month',aggregate:'sum',dateFrom:'',dateTo:''
+}
+const fieldId = (x:unknown) => typeof x === 'string' ? x.replace(/[\u0000-\u001F\u007F]/g,'').slice(0,128) : ''
+export function sanitizeConnected(raw:unknown):ConnectedChartConfig {
+  const x=isObject(raw)?raw:{}
+  const safeDate=(x:unknown)=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)?x:''
+  return {
+    sourceKey:typeof x.sourceKey==='string' && /^[a-zA-Z][\w-]{0,39}$/.test(x.sourceKey)?x.sourceKey:'',
+    dateFieldId:fieldId(x.dateFieldId),valueFieldId:fieldId(x.valueFieldId),categoryFieldId:fieldId(x.categoryFieldId),
+    groupBy:oneOf(x.groupBy,['month','day','category'],'month'),aggregate:oneOf(x.aggregate,['sum','count','avg'],'sum'),
+    dateFrom:safeDate(x.dateFrom),dateTo:safeDate(x.dateTo)
+  }
+}
 export type WidgetConfig = {
   theme: Theme
   density: Density
@@ -17,6 +36,8 @@ export type WidgetConfig = {
   timerMinutes: number
   chartType: ChartType
   chartData: ChartDatum[]
+  chartSource: 'manual' | 'notion'
+  connected: ConnectedChartConfig
   clockStyle: ClockStyle
   clock24h: boolean
   rouletteOptions: string[]
@@ -26,6 +47,7 @@ export const TIMEZONES = ['Asia/Seoul', 'Asia/Tokyo', 'Europe/Prague', 'Europe/L
 export const defaultConfig: WidgetConfig = {
   theme: 'cream', density: 'comfort', radius: 22, instanceId: 'default', level: 'medium', timezone: 'Asia/Seoul', examples: true,
   timerMinutes: 25, chartType: 'bar', chartData: [{label:'월',value:42},{label:'화',value:68},{label:'수',value:52},{label:'목',value:89},{label:'금',value:76}],
+  chartSource:'manual',connected:defaultConnectedChart,
   clockStyle: 'digital', clock24h: true,
   rouletteOptions: ['공부하기','산책하기','책 읽기','휴식하기'],
   habits: ['20분 공부하기','물 한 잔 마시기','책 10쪽 읽기']
@@ -53,6 +75,7 @@ export function sanitizeConfig(raw: unknown): WidgetConfig {
     examples: typeof x.examples === 'boolean' ? x.examples : d.examples,
     timerMinutes: typeof x.timerMinutes === 'number' && [5,15,25,50].includes(x.timerMinutes) ? x.timerMinutes : d.timerMinutes,
     chartType: oneOf(x.chartType,['bar','line','donut'],d.chartType), chartData: chart.length>0 ? chart : d.chartData,
+    chartSource:oneOf(x.chartSource,['manual','notion'],d.chartSource),connected:sanitizeConnected(x.connected),
     clockStyle: oneOf(x.clockStyle,['digital','analog'],d.clockStyle),
     clock24h: typeof x.clock24h === 'boolean' ? x.clock24h : d.clock24h,
     rouletteOptions: strings(x.rouletteOptions,d.rouletteOptions,10).length>=2 ? strings(x.rouletteOptions,d.rouletteOptions,10) : d.rouletteOptions,
@@ -61,7 +84,11 @@ export function sanitizeConfig(raw: unknown): WidgetConfig {
 }
 // URL-safe UTF-8 base64, with an upper bound to avoid excessive untrusted input.
 export function encodeConfig(config: WidgetConfig): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(sanitizeConfig(config)))
+  const safe=sanitizeConfig(config)
+  // Never publish stale manual values when sharing a connected widget URL.
+  if(safe.chartSource==='notion')safe.chartData=defaultConfig.chartData
+  else safe.connected=defaultConnectedChart
+  const bytes = new TextEncoder().encode(JSON.stringify(safe))
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')

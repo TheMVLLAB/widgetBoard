@@ -1,6 +1,6 @@
 # ✳ Widget Playground
 
-**Small widgets. Big personality.** A playful collection of embeddable, interactive widgets for Notion, hosted on GitHub Pages.
+**Small widgets. Big personality.** A playful collection of embeddable, interactive widgets for Notion, hosted on GitHub Pages. **v0.2 additionally includes optional personal Notion DB charts using a Cloudflare Worker. See [CONNECTED_WIDGETS.md](./CONNECTED_WIDGETS.md).**
 
 ### Included in v0.1
 
@@ -64,7 +64,7 @@ The `?embed=...` query route renders **only the widget**, not the gallery UI. A 
 - `src/styles.css`: complete responsive styling and three widget themes.
 - `src/lib/config.test.ts`: data safety and deterministic word selection tests.
 
-No server, login or Notion OAuth is needed. It does not read or edit Notion databases.
+The original seven local widget modes require no backend. **Personal Notion DB chart mode** in v0.2 requires an optional Cloudflare Worker with a read-only Notion internal connection and personal authentication. Notion write-back and OAuth are not implemented.
 
 ## Important limitations
 
@@ -88,3 +88,22 @@ No server, login or Notion OAuth is needed. It does not read or edit Notion data
 Post-MVP ideas: Daily Quiz, Knowledge Capsule, Desktop Pet, Quote Collector, Goal Ring, Notion API-connected widgets via a secure backend, and cloud sync.
 
 License: This project is a personal starter implementation; no license has been assigned. Add a license before accepting public contributions.
+
+---
+
+## v0.2 Update: Connected Widgets (personal Notion DB)
+
+The v0.2 source adds **read-only Notion database-connected Mini Charts** with a separate Cloudflare Worker API. The existing seven widgets and their manual-data behavior remain available. The Builder now supports `Manual` and `Notion DB` chart sources. Authentication uses a high-entropy personal access key (never embedded in a URL), short-lived in-memory access token and explicit allowlist of data source aliases. The Worker aggregates page data on the server.
+
+**Start with [CONNECTED_WIDGETS.md](./CONNECTED_WIDGETS.md)** for full Korean deployment, secret, and personal-Notion-connection instructions.
+
+Additional project commands after `npm install`:
+
+```bash
+npm run typecheck:worker
+npm run test:worker
+npm run worker:dev
+npm run worker:deploy
+```
+
+This is **source implementation with mocked API tests**, not an assertion that your actual Notion workspace or GitHub/Cloudflare accounts have been connected or deployed. `offline-preview.html` still previews the original v0.1 interface only; it does not run the new connected data feature.
