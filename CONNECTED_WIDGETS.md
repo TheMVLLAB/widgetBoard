@@ -1,8 +1,12 @@
 # Widget Playground v0.2 · 개인용 Notion DB 연동
 
-> 상태: **연동 기능의 소스 코드 및 자동화 테스트 작성 완료. 실제 Notion 계정과 GitHub/Cloudflare 배포 환경 연결은 별도 진행 필요.**
+> 상태: **2026-10-12 프로덕션 배포 완료. GitHub Pages에서 개인 접근 키 인증, 실제 Notion 데이터 소스·속성 조회 및 집계 차트 표시 확인. Notion 앱 내 임베드는 별도 검증 필요.**
 >
 > **내부 연결 비밀키, 개인 접근 키, 세션 서명키를 GitHub 저장소, 채팅, 위젯 URL에 입력하지 마세요.**
+
+- 운영 사이트: https://themvllab.github.io/widgetBoard/
+- 운영 API: https://widgetboard.themvllab.workers.dev (`/api/health`는 JSON 응답)
+- 운영 `SITE_ORIGIN`: `https://themvllab.github.io`만 허용합니다. 로컬 `.env.local`과 `worker/.dev.vars`는 개발 환경 설정을 유지합니다.
 
 ## 구성
 
