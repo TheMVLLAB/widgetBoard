@@ -93,7 +93,7 @@ License: This project is a personal starter implementation; no license has been 
 
 ## v0.2 Update: Connected Widgets (personal Notion DB)
 
-The v0.2 source adds **read-only Notion database-connected Mini Charts** with a separate Cloudflare Worker API. The existing seven widgets and their manual-data behavior remain available. The Builder now supports `Manual` and `Notion DB` chart sources. Authentication uses a high-entropy personal access key (never embedded in a URL), short-lived in-memory access token and explicit allowlist of data source aliases. The Worker aggregates page data on the server.
+The v0.2 source adds **read-only Notion database-connected Mini Charts** with a separate Cloudflare Worker API. The existing seven widgets and their manual-data behavior remain available. The Builder now supports `Manual` and `Notion DB` chart sources. Authentication uses a high-entropy personal access key (never embedded in a URL or stored in the browser), a signed 30-day session token persisted in browser localStorage, and an explicit allowlist of data source aliases. Refreshing the page restores the session; logout or an authentication rejection removes it. Embeds that block storage use a memory-only session and display a warning. The Worker aggregates page data on the server.
 
 **Start with [CONNECTED_WIDGETS.md](./CONNECTED_WIDGETS.md)** for full Korean deployment, secret, and personal-Notion-connection instructions.
 

@@ -3,11 +3,17 @@ import type { ConnectedChartConfig } from '../../lib/config'
 
 const rawBase=String(import.meta.env.VITE_NOTION_API_BASE||'').trim().replace(/\/$/,'')
 export const API_BASE=/^https:\/\/[^/]+$/.test(rawBase)||/^http:\/\/localhost:\d+$/.test(rawBase)?rawBase:''
+const sessionKey=`widget-playground:v1:notion-session:${API_BASE}`
 let sessionToken=''
+try{sessionToken=localStorage.getItem(sessionKey)||''}catch{ /* iframe storage may be blocked */ }
 const listeners=new Set<()=>void>()
 const emit=()=>listeners.forEach(fn=>fn())
 export function useSessionToken(){return useSyncExternalStore(sub=>{listeners.add(sub);return()=>listeners.delete(sub)},()=>sessionToken,()=> '')}
-export function clearSession(){sessionToken='';emit()}
+export function clearSession(){
+  sessionToken=''
+  try{localStorage.removeItem(sessionKey)}catch{ /* iframe storage may be blocked */ }
+  emit()
+}
 export type ConnectedSource={key:string;title:string;fieldCount:number}
 export type NotionField={id:string;name:string;type:string}
 export type ChartResponse={data:{label:string;value:number}[];recordCount:number;groupCount:number;updatedAt:string}
@@ -30,7 +36,9 @@ export async function requestApi<T>(path:string,method:'GET'|'POST'='GET',payloa
 export async function login(accessKey:string){
   const {token}=await requestApi<{token:string}>('/api/auth/login','POST',{key:accessKey})
   if(!token)throw new Error('인증 응답이 올바르지 않습니다.')
-  sessionToken=token;emit()
+  sessionToken=token
+  try{localStorage.setItem(sessionKey,token)}catch{ /* iframe storage may be blocked */ }
+  emit()
 }
 export async function fetchSources(){return (await requestApi<{sources:ConnectedSource[]}>('/api/notion/data-sources')).sources}
 export async function fetchSchema(key:string){return (await requestApi<{key:string;fields:NotionField[]}>(`/api/notion/data-sources/${encodeURIComponent(key)}/schema`)).fields}

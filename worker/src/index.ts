@@ -10,6 +10,7 @@ export interface Env {
 }
 const NOTION_VERSION='2026-03-11'
 const API='https://api.notion.com/v1'
+const SESSION_TTL=30*24*60*60
 const encoder=new TextEncoder()
 const forbidCache={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}
 function json(data:unknown,status=200,extra?:HeadersInit){return new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8',...forbidCache,...extra}})}
@@ -25,7 +26,7 @@ async function sameSecret(a:string,b:string){
   return new Uint8Array(ah).every((n,i)=>n===new Uint8Array(bh)[i])
 }
 async function mintSession(env:Env){
-  const payload=b64(encoder.encode(JSON.stringify({v:1,exp:Math.floor(Date.now()/1000)+1800,nonce:crypto.randomUUID()})))
+  const payload=b64(encoder.encode(JSON.stringify({v:1,exp:Math.floor(Date.now()/1000)+SESSION_TTL,nonce:crypto.randomUUID()})))
   const mac=b64(new Uint8Array(await crypto.subtle.sign('HMAC',await key(env.SESSION_SECRET),encoder.encode(payload))))
   return `${payload}.${mac}`
 }
@@ -37,7 +38,8 @@ async function authenticated(req:Request,env:Env){
     const valid=await crypto.subtle.verify('HMAC',await key(env.SESSION_SECRET),fromB64(mac),encoder.encode(payload))
     if(!valid)return false
     const data=JSON.parse(new TextDecoder().decode(fromB64(payload))) as {v:number;exp:number}
-    return data.v===1 && Number.isInteger(data.exp)&&data.exp>Math.floor(Date.now()/1000) && data.exp<Math.floor(Date.now()/1000)+1900
+    const now=Math.floor(Date.now()/1000)
+    return data.v===1 && Number.isInteger(data.exp)&&data.exp>now && data.exp<=now+SESSION_TTL
   }catch{return false}
 }
 function sources(env:Env){
@@ -77,7 +79,7 @@ async function main(req:Request,env:Env):Promise<Response>{
     const body=await readJson(req)
     const supplied=typeof body.key==='string'&&body.key.length<=1024?body.key:''
     if(!supplied || !await sameSecret(supplied,env.ADMIN_ACCESS_KEY))return jsonError('개인 접근 키가 올바르지 않습니다.',401)
-    return json({token:await mintSession(env),expiresIn:1800})
+    return json({token:await mintSession(env),expiresIn:SESSION_TTL})
   }
   if(!await authenticated(req,env))return jsonError('인증이 필요하거나 세션이 만료되었습니다.',401)
   const map=sources(env)
