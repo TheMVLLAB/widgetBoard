@@ -1,6 +1,6 @@
 # Widget Playground v0.3 · Notion OAuth 개발 및 배포 가이드
 
-> 상태: **의존성 설치, 로컬·운영 D1 마이그레이션, Worker 타입 검사·테스트 6개, 프론트엔드 테스트 6개·빌드 및 OAuth Worker 운영 배포 완료**. 실제 Notion 사용자 승인·DB 접근과 노션 앱 임베드 동작은 아직 미검증입니다.
+> 상태: **의존성 설치, 로컬·운영 D1 마이그레이션, Worker 타입 검사·테스트 6개, 프론트엔드 테스트 6개·빌드, OAuth Worker 및 GitHub Pages 운영 배포 완료**. 운영 Builder의 연결 버튼에서 Notion 공식 승인 경로로 이동하는 것을 확인했습니다. 실제 Notion 사용자 승인·DB 접근과 노션 앱 임베드 동작은 아직 미검증입니다.
 >
 > **비밀키를 GitHub, 이 채팅, `VITE_*` 변수나 임베드 주소에 기록하지 마세요.**
 >
@@ -11,7 +11,7 @@
 > - GitHub Pages는 `https://themvllab.github.io/widgetBoard/`, Source는 GitHub Actions입니다. `VITE_NOTION_API_BASE`를 새 운영 API `https://widget-playground-notion.themvllab.workers.dev`로 변경했습니다. 이전 `https://widgetboard.themvllab.workers.dev`는 OAuth API로 사용하지 않습니다.
 > - 운영 Worker: `https://widget-playground-notion.themvllab.workers.dev`. `/api/health` 200(v0.3), OAuth 시작 302, 미인증 `/api/me` 401 및 Pages origin CORS를 확인했습니다. Notion 로그인 페이지까지 열었으며 실제 로그인·사용자 승인은 수행하지 않았습니다.
 > - Notion Developer Portal에 운영 Redirect URI **`https://widget-playground-notion.themvllab.workers.dev/api/auth/notion/callback`**를 등록해야 합니다. 운영 `FRONTEND_URL`은 `https://themvllab.github.io/widgetBoard/`입니다.
-> - GitHub Pages 프론트엔드는 `main` push로 배포합니다. 이후 Mini Charts에서 본인 계정으로 승인하고 DB 선택·차트 저장·공개/공유 해제를 확인하세요.
+> - GitHub Pages 프론트엔드 배포 완료. [Actions 실행 38333135557](https://github.com/TheMVLLAB/widgetBoard/actions/runs/38333135557)에서 테스트·타입 검사·빌드·Pages 배포가 모두 통과했습니다. [운영 Mini Charts Builder](https://themvllab.github.io/widgetBoard/#/build/mini-charts)에서 Notion DB 선택·연결 화면과 브라우저의 운영 Worker health 200을 확인하고, 연결 버튼으로 Notion 공식 승인 경로 이동을 확인했습니다. 이후 본인 계정으로 승인하고 DB 선택·차트 저장·공개/공유 해제를 확인하세요.
 > - `.wrangler/` 런타임 DB·로그는 Git 추적에서 제거하고 ignore 처리했습니다. 과거 Git 기록은 삭제하지 않았습니다.
 
 ## 기능 요약
