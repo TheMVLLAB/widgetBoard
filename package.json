@@ -1,6 +1,6 @@
 {
   "name": "widget-playground",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,10 +9,13 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:worker": "node --experimental-strip-types --test worker/test/*.test.mjs",
+    "test:worker": "node --experimental-strip-types --experimental-sqlite --test worker/test/*.test.mjs",
     "typecheck:worker": "tsc -p worker/tsconfig.json",
     "worker:dev": "wrangler dev --config worker/wrangler.jsonc",
-    "worker:deploy": "wrangler deploy --config worker/wrangler.jsonc"
+    "worker:deploy": "wrangler deploy --config worker/wrangler.jsonc",
+    "db:create": "wrangler d1 create widget-playground-oauth --config worker/wrangler.jsonc",
+    "db:migrate:local": "wrangler d1 migrations apply widget-playground-oauth --local --config worker/wrangler.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply widget-playground-oauth --remote --config worker/wrangler.jsonc"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

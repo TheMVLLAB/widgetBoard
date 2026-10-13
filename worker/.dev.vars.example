@@ -1,8 +1,9 @@
-# Copy this file to .dev.vars locally. NEVER commit .dev.vars.
-NOTION_TOKEN="secret_your_notion_internal_connection_token"
-# Allow only explicit data source IDs. Public embed URLs reference aliases, NOT raw IDs.
-NOTION_SOURCES_JSON='{"study":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}'
-# Use separate 64-character random hexadecimal strings for each key (openssl rand -hex 32).
-ADMIN_ACCESS_KEY="REPLACE_WITH_64_RANDOM_HEX_CHARACTERS"
-SESSION_SECRET="REPLACE_WITH_ANOTHER_64_RANDOM_HEX_CHARACTERS"
-SITE_ORIGIN="http://localhost:5173,https://YOUR_NAME.github.io"
+# Public Notion Connection: Configuration > OAuth client credentials
+NOTION_CLIENT_ID="your-public-notion-client-id"
+NOTION_CLIENT_SECRET="your-public-notion-client-secret"
+# Must exactly match a redirect URL configured in Notion Developer Portal
+NOTION_REDIRECT_URI="http://localhost:8787/api/auth/notion/callback"
+# 32-byte random key encoded as 64 hex characters, never commit to Git
+TOKEN_ENCRYPTION_KEY="replace_with_64_hex_characters"
+# Must be the actual browser origin + optional app path; no #fragment
+FRONTEND_URL="http://localhost:5173/"

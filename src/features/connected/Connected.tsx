@@ -1,87 +1,118 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Check, LockKeyhole, LogOut, RefreshCcw, ShieldCheck } from 'lucide-react'
-import { API_BASE,clearSession,fetchChart,fetchSchema,fetchSources,login,useSessionToken } from './api'
-import type { ConnectedSource, NotionField, ChartResponse } from './api'
+import { Check, ExternalLink, LockKeyhole, LogOut, RefreshCcw, ShieldCheck } from 'lucide-react'
+import { API_BASE, beginNotionAuth, disconnect, fetchChart, fetchPublicChart, fetchSchema, fetchSources, logout, publishChart, saveChart, unpublishChart, useSessionToken, workspaces, savedCharts, refreshChart } from './api'
+import type { ChartResponse, ConnectedSource, NotionField, PublishedChart, Workspace, SavedChart } from './api'
 import type { ConnectedChartConfig, WidgetConfig } from '../../lib/config'
-import { storageAvailable } from '../../lib/storage'
+import { defaultConfig, defaultConnectedChart, embedUrl } from '../../lib/config'
 
+export function OAuthFinish({ticket}:{ticket:string}){
+  const [message,setMessage]=useState('Notion 연결을 완료하는 중...')
+  const started=useRef(false)
+  useEffect(()=>{if(started.current)return;started.current=true;import('./api').then(({redeemTicket})=>redeemTicket(ticket)).then(()=>{setMessage('연결 성공! 차트 Builder로 이동합니다.');window.location.replace(`${location.pathname}#/build/mini-charts`)}).catch(err=>setMessage(`연결 실패: ${err.message}`))},[ticket])
+  return <section className="connected-oauth-finish" role="status"><h2>Notion OAuth</h2><p>{message}</p><a href="#/build/mini-charts">Mini Charts로 돌아가기</a></section>
+}
 export function LoginBox({compact=false}:{compact?:boolean}){
-  const [accessKey,setAccessKey]=useState('')
-  const [loading,setLoading]=useState(false)
-  const [error,setError]=useState('')
   const token=useSessionToken()
-  const [canStoreSession]=useState(storageAvailable)
-  if(!API_BASE)return <div className="connected-alert"><LockKeyhole size={18}/> <span>연동 API 주소가 아직 설정되지 않았습니다. README의 배포 안내를 따라 설정하세요.</span></div>
-  if(token)return <div className="connected-user"><ShieldCheck size={16}/> 개인 세션 연결됨 <button type="button" onClick={clearSession}><LogOut size={14}/> 종료</button></div>
-  return <form className={`connected-login ${compact?'connected-login-compact':''}`} onSubmit={async e=>{e.preventDefault();setLoading(true);setError('');try{await login(accessKey);setAccessKey('')}catch(err){setError((err as Error).message)}finally{setLoading(false)}}}>
-    <LockKeyhole size={22}/><strong>개인 데이터 보호</strong><span>Worker에 등록한 개인 접근 키를 입력해 주세요. 키 자체는 저장하지 않으며, 인증 토큰을 이 브라우저에 저장해 30일 동안 연결을 유지합니다. 공용 기기에서는 사용 후 종료해 주세요.</span>
-    <input aria-label="개인 접근 키" autoComplete="off" type="password" minLength={32} maxLength={1024} placeholder="개인 접근 키 (32자 이상)" value={accessKey} onChange={e=>setAccessKey(e.target.value)} required/>
-    <button disabled={loading||accessKey.length<32} type="submit">{loading?'인증 중...':'연결하기'}</button>
-    {!canStoreSession&&<div role="alert" className="connected-error">브라우저 저장소가 차단되어 새로고침하면 접근 키를 다시 입력해야 합니다.</div>}
-    {error&&<div role="alert" className="connected-error">{error}</div>}
-  </form>
+  const [error,setError]=useState('')
+  const [spaces,setSpaces]=useState<Workspace[]>([])
+  useEffect(()=>{if(token)workspaces().then(setSpaces).catch(()=>setSpaces([]));else setSpaces([])},[token])
+  if(!API_BASE)return <div className="connected-alert"><LockKeyhole size={18}/> 연동 API 주소를 아직 설정하지 않았습니다.</div>
+  if(!token)return <div className={`connected-login ${compact?'connected-login-compact':''}`}>
+    <ShieldCheck size={21}/><strong>Notion 계정 연결</strong>
+    <span>개인 API 키를 입력할 필요가 없어요. Notion에서 공유할 DB를 선택해 승인하면 됩니다.</span>
+    <button type="button" onClick={()=>{try{beginNotionAuth()}catch(e){setError((e as Error).message)}}}>Notion 계정 연결 <ExternalLink size={14}/></button>
+    {error&&<p className="connected-error" role="alert">{error}</p>}
+  </div>
+  return <div className="connected-user"><ShieldCheck size={16}/> 연결됨 {spaces.length?`· ${spaces.map(w=>w.name).join(', ')}`:''}
+    <button type="button" onClick={beginNotionAuth}>워크스페이스 추가</button><button type="button" onClick={()=>{void logout()}}><LogOut size={14}/> 로그아웃</button>
+  </div>
 }
 const dateTypes=['date','created_time','last_edited_time']
 const numericTypes=['number','formula','rollup']
 const categoryTypes=['select','status','multi_select','checkbox']
-function pickSelect(label:string,value:string,fields:NotionField[],allowed:string[],update:(s:string)=>void){return <label className="connected-field"><span>{label}</span><select value={value} onChange={e=>update(e.target.value)}><option value="">속성 선택</option>{fields.filter(f=>allowed.includes(f.type)).map(f=><option value={f.id} key={f.id}>{f.name} · {f.type}</option>)}</select></label>}
+function fieldSelect(label:string,value:string,fields:NotionField[],allowed:string[],update:(s:string)=>void){return <label className="connected-field"><span>{label}</span><select value={value} onChange={e=>update(e.target.value)}><option value="">속성 선택</option>{fields.filter(f=>allowed.includes(f.type)).map(f=><option key={f.id} value={f.id}>{f.name} · {f.type}</option>)}</select></label>}
 export function ConnectedSettings({config,update}:{config:WidgetConfig;update:(v:ConnectedChartConfig)=>void}){
   const token=useSessionToken()
-  const [sources,setSources]=useState<ConnectedSource[]>([])
-  const [fields,setFields]=useState<NotionField[]>([])
-  const [error,setError]=useState('')
-  const [loading,setLoading]=useState(false)
+  const [sources,setSources]=useState<ConnectedSource[]>([]),[fields,setFields]=useState<NotionField[]>([])
+  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[spaces,setSpaces]=useState<Workspace[]>([])
   const c=config.connected
-  useEffect(()=>{if(!token)return;let live=true;setLoading(true);setError('');fetchSources().then(s=>{if(live)setSources(s)}).catch(e=>{if(live)setError(e.message)}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[token])
-  useEffect(()=>{if(!token||!c.sourceKey){setFields([]);return}let live=true;fetchSchema(c.sourceKey).then(f=>{if(live)setFields(f)}).catch(e=>{if(live){setFields([]);setError(e.message)}});return()=>{live=false}},[token,c.sourceKey])
+  const refresh=useCallback(()=>{if(!token)return;setLoading(true);setError('');Promise.all([fetchSources(),workspaces()]).then(([s,w])=>{setSources(s);setSpaces(w)}).catch(e=>setError(e.message)).finally(()=>setLoading(false))},[token])
+  useEffect(()=>{refresh()},[refresh])
+  useEffect(()=>{if(!token||!c.sourceKey){setFields([]);return}let active=true;fetchSchema(c.sourceKey).then(f=>{if(active)setFields(f)}).catch(e=>{if(active)setError(e.message)});return()=>{active=false}},[token,c.sourceKey])
   if(!token)return <LoginBox/>
-  const set=(values:Partial<ConnectedChartConfig>)=>update({...c,...values})
+  const set=(patch:Partial<ConnectedChartConfig>)=>update({...c,...patch})
   return <div className="connected-form">
     <LoginBox compact/>
-    {loading&&<span className="connected-help">연결된 데이터 소스를 불러오는 중...</span>}
-    {error&&<p className="connected-error" role="alert">{error}</p>}
-    <label className="connected-field"><span>Notion 데이터 소스</span><select value={c.sourceKey} onChange={e=>set({sourceKey:e.target.value,dateFieldId:'',valueFieldId:'',categoryFieldId:''})}><option value="">데이터 소스 선택</option>{sources.map(s=><option value={s.key} key={s.key}>{s.title} ({s.key})</option>)}</select></label>
+    <button type="button" className="connected-subtle-button" onClick={refresh} disabled={loading}><RefreshCcw size={14}/> DB 목록 새로고침</button>
+    {spaces.map(space=><div className="connected-connection" key={space.id}><span>{space.name}</span><button type="button" onClick={async()=>{if(!confirm(`${space.name} 연결을 해제할까요? 이 워크스페이스에 연결된 위젯도 사용할 수 없게 됩니다.`))return;try{await disconnect(space.id);set({sourceKey:'',dateFieldId:'',valueFieldId:'',categoryFieldId:''});refresh()}catch(e){setError((e as Error).message)}}}>해제</button></div>)}
+    {loading&&<span className="connected-help">연결된 DB를 검색하는 중...</span>}
+    {error&&<p role="alert" className="connected-error">{error}</p>}
+    <label className="connected-field"><span>Notion 데이터 소스</span><select value={c.sourceKey} onChange={e=>set({sourceKey:e.target.value,dateFieldId:'',valueFieldId:'',categoryFieldId:''})}><option value="">데이터 소스 선택</option>{sources.map(s=><option key={s.key} value={s.key}>{s.title} · {s.workspace}</option>)}</select></label>
     {c.sourceKey&&<>
       <label className="connected-field"><span>그룹화</span><select value={c.groupBy} onChange={e=>set({groupBy:e.target.value as ConnectedChartConfig['groupBy']})}><option value="month">월별</option><option value="day">일별</option><option value="category">카테고리별</option></select></label>
-      <label className="connected-field"><span>집계 방식</span><select value={c.aggregate} onChange={e=>set({aggregate:e.target.value as ConnectedChartConfig['aggregate']})}><option value="sum">합계</option><option value="count">건수</option><option value="avg">평균</option></select></label>
-      {pickSelect('날짜 속성',c.dateFieldId,fields,dateTypes,v=>set({dateFieldId:v}))}
-      {c.groupBy==='category'&&pickSelect('분류 속성',c.categoryFieldId,fields,categoryTypes,v=>set({categoryFieldId:v}))}
-      {c.aggregate!=='count'&&pickSelect('숫자 속성',c.valueFieldId,fields,numericTypes,v=>set({valueFieldId:v}))}
-      <div className="connected-dates"><label className="connected-field"><span>시작일 (선택)</span><input type="date" value={c.dateFrom} onChange={e=>set({dateFrom:e.target.value})}/></label><label className="connected-field"><span>종료일 (선택)</span><input type="date" value={c.dateTo} onChange={e=>set({dateTo:e.target.value})}/></label></div>
-      <p className="connected-help"><Check size={13}/> API는 읽기 전용이며 차트 집계 결과만 반환합니다. 다중 선택 태그는 여러 그룹에 각각 집계됩니다.</p>
+      <label className="connected-field"><span>집계</span><select value={c.aggregate} onChange={e=>set({aggregate:e.target.value as ConnectedChartConfig['aggregate']})}><option value="sum">합계</option><option value="count">건수</option><option value="avg">평균</option></select></label>
+      {fieldSelect('날짜 속성',c.dateFieldId,fields,dateTypes,v=>set({dateFieldId:v}))}
+      {c.groupBy==='category'&&fieldSelect('카테고리 속성',c.categoryFieldId,fields,categoryTypes,v=>set({categoryFieldId:v}))}
+      {c.aggregate!=='count'&&fieldSelect('숫자 속성',c.valueFieldId,fields,numericTypes,v=>set({valueFieldId:v}))}
+      <div className="connected-dates"><label className="connected-field"><span>시작일</span><input type="date" value={c.dateFrom} onChange={e=>set({dateFrom:e.target.value})}/></label><label className="connected-field"><span>종료일</span><input type="date" value={c.dateTo} onChange={e=>set({dateTo:e.target.value})}/></label></div>
+      <p className="connected-help"><Check size={13}/> 서버가 집계한 값만 브라우저에 전달합니다. 읽기 전용입니다.</p>
     </>}
   </div>
 }
-export function useConnectedData(config: ConnectedChartConfig){
+export function useConnectedData(config:ConnectedChartConfig){
   const token=useSessionToken()
-  const [result,setResult]=useState<ChartResponse|null>(null)
-  const [error,setError]=useState('')
-  const [loading,setLoading]=useState(false)
-  const [seq,setSeq]=useState(0)
-  const reload=useCallback(()=>setSeq(v=>v+1),[])
+  const [result,setResult]=useState<ChartResponse|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(false),[seq,setSeq]=useState(0)
+  const reload=useCallback(()=>setSeq(x=>x+1),[])
   const settings=JSON.stringify(config)
   useEffect(()=>{
     if(!token||!config.sourceKey){setResult(null);setError('');return}
-    if((config.groupBy!=='category'&&!config.dateFieldId)|| (config.groupBy==='category'&&!config.categoryFieldId) || (config.aggregate!=='count'&&!config.valueFieldId)){setResult(null);setError('날짜·분류·숫자 속성을 설정해 주세요.');return}
-    let live=true
-    setLoading(true);setError('');setResult(null)
-    fetchChart(config).then(data=>{if(live)setResult(data)}).catch(e=>{if(live){setError(e.message);setResult(null)}}).finally(()=>{if(live)setLoading(false)})
-    return()=>{live=false}
-  // Serialize validated input changes to avoid effect loops from object identity.
+    if((config.groupBy!=='category'&&!config.dateFieldId)||(config.groupBy==='category'&&!config.categoryFieldId)||(config.aggregate!=='count'&&!config.valueFieldId)){setResult(null);setError('속성을 모두 선택하세요.');return}
+    let active=true;setLoading(true);setResult(null);setError('')
+    fetchChart(config).then(r=>{if(active)setResult(r)}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setLoading(false)})
+    return()=>{active=false}
   },[token,settings,seq])
-  useEffect(()=>{if(!token)return;const timer=setInterval(()=>{if(document.visibilityState==='visible')reload()},5*60*1000);return()=>clearInterval(timer)},[token,reload])
+  useEffect(()=>{if(!token)return;const timer=setInterval(()=>{if(document.visibilityState==='visible')reload()},300000);return()=>clearInterval(timer)},[token,reload])
   return {result,error,loading,reload}
 }
 export function ConnectedChartFrame({config,render}:{config:WidgetConfig;render:(result:ChartResponse)=>ReactNode}){
+  const id=new URLSearchParams(location.search).get('shared')
   const token=useSessionToken()
   const {result,error,loading,reload}=useConnectedData(config.connected)
-  if(!API_BASE)return <div className="widget-body"><div className="connected-alert">연동 API가 설정되지 않았습니다. GitHub Pages의 VITE_NOTION_API_BASE 변수를 확인하세요.</div></div>
-  if(!token)return <div className="widget-body"><LoginBox/></div>
-  return <div className="connected-runtime">
-    <div className="connected-runtime-status"><span><ShieldCheck size={13}/> Notion DB · Private</span><button onClick={reload} type="button" aria-label="차트 새로고침" disabled={loading}><RefreshCcw size={14}/> {loading?'로딩 중':'새로고침'}</button></div>
+  const [publicResult,setPublicResult]=useState<PublishedChart|null>(null),[publicError,setPublicError]=useState('')
+  useEffect(()=>{if(!id)return;let active=true;fetchPublicChart(id).then(r=>{if(active)setPublicResult(r)}).catch(e=>{if(active)setPublicError(e.message)});return()=>{active=false}},[id])
+  if(id)return <div className="connected-runtime">{publicError&&<p role="alert" className="connected-error">{publicError}</p>}{publicResult?render(publicResult):<div className="connected-empty">{publicError||'공유 집계값을 불러오는 중...'}</div>}{publicResult&&<div className="connected-foot">공개 스냅샷 · {new Date(publicResult.updatedAt).toLocaleString('ko-KR')} 기준 · 자동 갱신되지 않음</div>}</div>
+  if(!API_BASE)return <div className="connected-alert">Notion API 연결 주소가 설정되지 않았습니다.</div>
+  if(!token)return <div className="connected-runtime"><div className="connected-alert"><LockKeyhole size={18}/> 비공개 차트입니다. 임베드에서는 자동 로그인을 지원하지 않습니다.</div><p>Widget Playground의 차트 Builder를 새 창에서 열고 Notion을 연결해 확인하세요.</p><a href={`${location.origin}${location.pathname}#/build/mini-charts`} target="_blank" rel="noreferrer">Builder에서 열기 <ExternalLink size={14}/></a></div>
+  return <div className="connected-runtime"><div className="connected-runtime-status"><span><ShieldCheck size={13}/> Notion DB · Private</span><button type="button" onClick={reload} disabled={loading}><RefreshCcw size={14}/> {loading?'불러오는 중':'새로고침'}</button></div>{error&&<p className="connected-error" role="alert">{error}</p>}{result?render(result):<div className="connected-empty">{loading?'Notion 데이터를 집계하는 중...':'차트 설정을 확인해 주세요.'}</div>}{result&&<div className="connected-foot">{result.recordCount}건 집계 · {new Date(result.updatedAt).toLocaleString('ko-KR')}</div>}</div>
+}
+export function PublishBox({config}:{config:WidgetConfig}){
+  const token=useSessionToken()
+  const [id,setId]=useState(''),[status,setStatus]=useState<'private'|'public'>('private'),[error,setError]=useState(''),[busy,setBusy]=useState(false),[confirmPublic,setConfirmPublic]=useState(false)
+  useEffect(()=>{setId('');setStatus('private');setConfirmPublic(false)},[config.connected.sourceKey,config.connected.dateFieldId,config.connected.valueFieldId,config.connected.categoryFieldId,config.connected.groupBy,config.connected.aggregate,config.connected.dateFrom,config.connected.dateTo,config.chartType])
+  if(!token)return <div className="connected-alert">Notion 계정을 먼저 연결하세요.</div>
+  const publishedUrl=id&&status==='public'?`${embedUrl('mini-charts',{...config,connected:defaultConnectedChart},location.origin,location.pathname)}&shared=${encodeURIComponent(id)}`:''
+  const run=async(action:()=>Promise<void>)=>{setBusy(true);setError('');try{await action()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
+  return <div className="connected-publish">
+    <h3>Connected Chart · 공유 관리</h3>
+    <p>개인용 차트는 기본 비공개야. 노션 앱에서 로그인 없이 표시하려면 <strong>집계 결과 스냅샷</strong>을 공개해야 해.</p>
+    {!id&&<button disabled={busy||!config.connected.sourceKey} type="button" onClick={()=>void run(async()=>{const w=await saveChart(config.connected,config.chartType,'Connected Mini Chart');setId(w.id)})}>① 차트 비공개 저장</button>}
+    {id&&status==='private'&&<><label className="connected-public-confirm"><input type="checkbox" checked={confirmPublic} onChange={e=>setConfirmPublic(e.target.checked)}/> 항목 이름, 수치 및 집계값이 링크를 가진 누구에게나 공개될 수 있음을 이해했습니다.</label><button type="button" disabled={busy||!confirmPublic} onClick={()=>void run(async()=>{await publishChart(id);setStatus('public')})}>② 공개 집계 스냅샷 생성</button></>}
+    {id&&status==='public'&&<><p className="connected-help">현재 차트 설정을 집계한 시점의 데이터만 공개돼. DB를 수정해도 스냅샷은 자동 갱신되지 않아.</p><label className="connected-field"><span>공개 임베드 URL</span><input readOnly value={publishedUrl} onFocus={e=>e.target.select()}/></label><button type="button" onClick={()=>navigator.clipboard.writeText(publishedUrl).catch(()=>setError('주소를 직접 복사해 주세요.'))}>공개 링크 복사</button><button type="button" disabled={busy} onClick={()=>void run(async()=>{await unpublishChart(id);setStatus('private');setConfirmPublic(false)})}>공유 해제</button></>}
+    {id&&status==='private'&&<p className="connected-help">비공개 저장됨 · 아직 공개 링크가 없습니다.</p>}
     {error&&<p className="connected-error" role="alert">{error}</p>}
-    {result?render(result):<div className="connected-empty" aria-live="polite">{loading?'Notion DB에서 데이터를 불러오는 중...':'위젯 설정을 확인해 주세요.'}</div>}
-    {result&&<div className="connected-foot">집계 항목 {result.recordCount}건 · 마지막 조회 {new Date(result.updatedAt).toLocaleTimeString('ko-KR')}</div>}
   </div>
+}
+
+export function SavedChartsManager(){
+  const token=useSessionToken(),[items,setItems]=useState<SavedChart[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState('')
+  const load=useCallback(()=>{if(!token)return;savedCharts().then(setItems).catch(e=>setError(e.message))},[token])
+  useEffect(()=>{load()},[load])
+  if(!token)return null
+  const act=async(id:string,op:'refresh'|'revoke')=>{setBusy(id);setError('');try{if(op==='refresh')await refreshChart(id);else await unpublishChart(id);load()}catch(e){setError((e as Error).message)}finally{setBusy('')}}
+  return <section className="connected-publish" aria-label="저장한 차트 관리"><h3>내가 저장한 차트</h3><button type="button" onClick={load}>목록 새로고침</button>
+    {items.length===0&&<p className="connected-help">저장한 차트가 없습니다.</p>}
+    {items.map(item=><div key={item.id} className="connected-saved-item"><strong>{item.title}</strong><span>{item.visibility==='public'?'공개 스냅샷':'비공개'}</span><div className="connected-saved-actions">{item.visibility==='public'&&<><button type="button" onClick={()=>{const url=embedUrl('mini-charts',{...defaultConfig,chartSource:'notion',chartType:item.chart_type as WidgetConfig['chartType'],connected:defaultConnectedChart},location.origin,location.pathname)+'&shared='+encodeURIComponent(item.id);navigator.clipboard.writeText(url).catch(()=>setError('링크를 복사하지 못했습니다.'))}}>공개 링크 복사</button><button type="button" disabled={busy===item.id} onClick={()=>void act(item.id,'refresh')}>스냅샷 갱신</button><button type="button" disabled={busy===item.id} onClick={()=>void act(item.id,'revoke')}>공유 해제</button></>}</div></div>)}
+    {error&&<p className="connected-error" role="alert">{error}</p>}
+  </section>
 }

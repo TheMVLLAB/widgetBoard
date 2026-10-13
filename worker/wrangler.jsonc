@@ -1,23 +1,16 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "widgetboard",
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "widget-playground-notion",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-12",
   "workers_dev": true,
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "widget-playground-oauth",
+    "database_id": "00f66ed8-ba60-4fc7-95ce-d4d70976501c",
+    "migrations_dir": "migrations"
+  }],
   "secrets": {
-    "required": ["NOTION_TOKEN", "NOTION_SOURCES_JSON", "ADMIN_ACCESS_KEY", "SESSION_SECRET", "SITE_ORIGIN"]
-  },
-  "observability": {
-    "logs": {
-      "enabled": true,
-      "head_sampling_rate": 1,
-      "invocation_logs": true,
-      "persist": true
-    },
-    "traces": {
-      "enabled": false,
-      "head_sampling_rate": 1,
-      "persist": true
-    }
-  },
+    "required": ["NOTION_CLIENT_ID", "NOTION_CLIENT_SECRET", "NOTION_REDIRECT_URI", "TOKEN_ENCRYPTION_KEY", "FRONTEND_URL"]
+  }
 }

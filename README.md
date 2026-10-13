@@ -1,6 +1,6 @@
 # ✳ Widget Playground
 
-**Small widgets. Big personality.** A playful collection of embeddable, interactive widgets for Notion, hosted on GitHub Pages. **v0.2 additionally includes optional personal Notion DB charts using a Cloudflare Worker. See [CONNECTED_WIDGETS.md](./CONNECTED_WIDGETS.md).**
+**Small widgets. Big personality.** A playful collection of embeddable, interactive widgets for Notion, hosted on GitHub Pages. **v0.3 adds user-specific Notion OAuth connections, D1 storage and consent-based chart snapshots. Start with [OAUTH_SETUP.md](./OAUTH_SETUP.md).**
 
 ### Included in v0.1
 
@@ -64,7 +64,7 @@ The `?embed=...` query route renders **only the widget**, not the gallery UI. A 
 - `src/styles.css`: complete responsive styling and three widget themes.
 - `src/lib/config.test.ts`: data safety and deterministic word selection tests.
 
-The original seven local widget modes require no backend. **Personal Notion DB chart mode** in v0.2 requires an optional Cloudflare Worker with a read-only Notion internal connection and personal authentication. Notion write-back and OAuth are not implemented.
+The original seven local widget modes require no backend. **Notion chart mode in v0.3** uses a Notion Public Connection, OAuth 2.0, a Cloudflare Worker and D1. A private embed does not automatically authenticate in Notion. Explicitly published aggregate snapshots can be embedded without login. No Notion write-back is supported. See [OAUTH_SETUP.md](./OAUTH_SETUP.md).
 
 ## Important limitations
 
@@ -85,15 +85,15 @@ The original seven local widget modes require no backend. **Personal Notion DB c
 
 ## Roadmap
 
-Post-MVP ideas: Daily Quiz, Knowledge Capsule, Desktop Pet, Quote Collector, Goal Ring, Notion API-connected widgets via a secure backend, and cloud sync.
+Post-MVP ideas: Daily Quiz, Knowledge Capsule, Desktop Pet, Quote Collector, Goal Ring, automatic snapshot refresh with explicit opt-in, and cloud sync.
 
 License: This project is a personal starter implementation; no license has been assigned. Add a license before accepting public contributions.
 
 ---
 
-## v0.2 Update: Connected Widgets (personal Notion DB)
+## v0.2 historical notes (superseded by v0.3 OAuth)
 
-The v0.2 source adds **read-only Notion database-connected Mini Charts** with a separate Cloudflare Worker API. The existing seven widgets and their manual-data behavior remain available. The Builder now supports `Manual` and `Notion DB` chart sources. Authentication uses a high-entropy personal access key (never embedded in a URL or stored in the browser), a signed 30-day session token persisted in browser localStorage, and an explicit allowlist of data source aliases. Refreshing the page restores the session; logout or an authentication rejection removes it. Embeds that block storage use a memory-only session and display a warning. The Worker aggregates page data on the server.
+The v0.2 source adds **read-only Notion database-connected Mini Charts** with a separate Cloudflare Worker API. The existing seven widgets and their manual-data behavior remain available. The Builder now supports `Manual` and `Notion DB` chart sources. Authentication uses a high-entropy personal access key (never embedded in a URL), short-lived in-memory access token and explicit allowlist of data source aliases. The Worker aggregates page data on the server.
 
 **Start with [CONNECTED_WIDGETS.md](./CONNECTED_WIDGETS.md)** for full Korean deployment, secret, and personal-Notion-connection instructions.
 

@@ -3,10 +3,10 @@ import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, Clock3
 import { defaultConfig, decodeConfig, embedUrl, isWidgetId, newInstanceId, sanitizeConfig, type ChartDatum, type WidgetConfig, type WidgetId } from './lib/config'
 import { registry, widgetById } from './lib/registry'
 import { WidgetRenderer, WidgetThumbnail } from './widgets/Widgets'
-import { ConnectedSettings } from './features/connected/Connected'
+import { ConnectedSettings, OAuthFinish, PublishBox, SavedChartsManager } from './features/connected/Connected'
 import type { ConnectedChartConfig } from './lib/config'
 
-type Route={page:'home';category:string}|{page:'detail'|'builder'|'embed';id:WidgetId;query:string}|{page:'missing'}
+type Route={page:'home';category:string}|{page:'oauth';ticket:string}|{page:'detail'|'builder'|'embed';id:WidgetId;query:string}|{page:'missing'}
 function routeFromHash():Route {
   // The standalone Notion URL uses a real query string because embedders may discard #fragments.
   const embedQuery = new URLSearchParams(location.search)
@@ -16,6 +16,7 @@ function routeFromHash():Route {
   const [path,query='']=raw.split('?')
   const parts=path.split('/').filter(Boolean)
   if(!parts.length)return {page:'home',category:new URLSearchParams(query).get('category')||'All widgets'}
+  if(parts[0]==='auth'&&parts[1]==='complete')return {page:'oauth',ticket:new URLSearchParams(query).get('ticket')||''}
   if(['widget','build','embed'].includes(parts[0])&&isWidgetId(parts[1]||''))return {page:parts[0]==='widget'?'detail':parts[0]==='build'?'builder':'embed',id:parts[1] as WidgetId,query}
   return {page:'missing'}
 }
@@ -30,7 +31,7 @@ function Sidebar({active,close}:{active:string;close:()=>void}){
     <div className="sidebar-bottom">MADE WITH <span>♥</span> FOR YOUR NOTION</div>
   </aside>
 }
-function Header({title,onMenu}:{title:string;onMenu:()=>void}){const [help,setHelp]=useState(false);return <><header className="topbar"><div className="topbar-left"><button className="mobile-menu" onClick={onMenu} aria-label="메뉴 열기"><Menu size={20}/></button><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{title}</strong></div><div className="topbar-right"><span className="version-pill"><span/> v0.1 BETA</span><button aria-label="노션에 설치하는 방법" className="help-btn" onClick={()=>setHelp(true)}><CircleHelp size={19}/></button></div></header>
+function Header({title,onMenu}:{title:string;onMenu:()=>void}){const [help,setHelp]=useState(false);return <><header className="topbar"><div className="topbar-left"><button className="mobile-menu" onClick={onMenu} aria-label="메뉴 열기"><Menu size={20}/></button><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{title}</strong></div><div className="topbar-right"><span className="version-pill"><span/> v0.3 OAUTH BETA</span><button aria-label="노션에 설치하는 방법" className="help-btn" onClick={()=>setHelp(true)}><CircleHelp size={19}/></button></div></header>
     {help&&<div role="presentation" className="modal-backdrop" onClick={()=>setHelp(false)}><section role="dialog" aria-modal="true" aria-label="노션 설치 안내" className="help-dialog" onClick={e=>e.stopPropagation()}><button className="dialog-close" onClick={()=>setHelp(false)} aria-label="닫기"><X size={20}/></button><div className="modal-icon">✳</div><h2>노션에 위젯 넣기</h2><ol><li>마음에 드는 위젯을 고르고 <b>Customize</b>를 눌러요.</li><li>색상과 내용을 설정한 뒤 <b>Copy embed link</b>를 눌러요.</li><li>노션에서 <b>/임베드</b> 블록을 추가하고 링크를 붙여넣어요.</li><li>블록 크기를 조절하면 끝!</li></ol><p>사용 기록은 브라우저별로 저장되며 일부 노션 환경에서는 저장이 제한될 수 있어요.</p><button className="primary-button" onClick={()=>setHelp(false)}>알겠어요 <Check size={16}/></button></section></div>}
   </>}
 function Gallery({category}:{category:string}){
@@ -76,13 +77,13 @@ function Builder({id}:{id:WidgetId}){
       {id==='focus-garden'&&labeledChoice('Focus session',String(config.timerMinutes),[5,15,25,50].map(n=>({value:String(n),label:`${n} minutes`})),v=>update('timerMinutes',Number(v)))}
       {id==='smart-clock'&&<>{labeledChoice('Display style',config.clockStyle,[{value:'digital',label:'Digital'},{value:'analog',label:'Analog'}],v=>update('clockStyle',v as WidgetConfig['clockStyle']))}<label className="toggle-field"><span>24-hour format</span><input type="checkbox" checked={config.clock24h} onChange={e=>update('clock24h',e.target.checked)}/></label></>}
       {(id==='daily-word'||id==='habit-stamps'||id==='smart-clock')&&labeledChoice('Timezone',config.timezone,['Asia/Seoul','Asia/Tokyo','Europe/Prague','Europe/London','America/New_York','UTC'].map(s=>({value:s,label:s})),v=>update('timezone',v))}
-      {id==='mini-charts'&&<><div className="connected-feature">✳ 이제 Notion DB와 읽기 전용으로 연결할 수 있습니다. 개인 접근 키는 위젯 URL에 포함되지 않습니다.</div>{labeledChoice('Data source',config.chartSource,[{value:'manual',label:'Manual · 수동 입력'},{value:'notion',label:'Notion DB · 개인 연결'}],v=>update('chartSource',v as WidgetConfig['chartSource']))}{labeledChoice('Chart type',config.chartType,[{value:'bar',label:'Bar chart'},{value:'line',label:'Line chart'},{value:'donut',label:'Donut chart'}],v=>update('chartType',v as WidgetConfig['chartType']))}{config.chartSource==='manual'?<label className="multiline-field">Chart data <span>한 줄에 항목,값 형식</span><textarea key={id} rows={6} defaultValue={config.chartData.map(x=>`${x.label},${x.value}`).join('\n')} onChange={e=>{const values=dataFromLines(e.target.value);if(values.length)update('chartData',values)}}/></label>:<ConnectedSettings config={config} update={(v:ConnectedChartConfig)=>update('connected',v)}/>}</>}
+      {id==='mini-charts'&&<><div className="connected-feature">✳ Notion 계정에서 승인한 DB만 읽을 수 있어요. 개인 API 토큰은 필요하지 않습니다.</div>{labeledChoice('Data source',config.chartSource,[{value:'manual',label:'Manual · 수동 입력'},{value:'notion',label:'Notion DB · 개인 연결'}],v=>update('chartSource',v as WidgetConfig['chartSource']))}{labeledChoice('Chart type',config.chartType,[{value:'bar',label:'Bar chart'},{value:'line',label:'Line chart'},{value:'donut',label:'Donut chart'}],v=>update('chartType',v as WidgetConfig['chartType']))}{config.chartSource==='manual'?<label className="multiline-field">Chart data <span>한 줄에 항목,값 형식</span><textarea key={id} rows={6} defaultValue={config.chartData.map(x=>`${x.label},${x.value}`).join('\n')} onChange={e=>{const values=dataFromLines(e.target.value);if(values.length)update('chartData',values)}}/></label>:<ConnectedSettings config={config} update={(v:ConnectedChartConfig)=>update('connected',v)}/>}</>}
       {id==='roulette'&&<label className="multiline-field">Roulette choices <span>줄바꿈으로 구분, 최대 10개</span><textarea key={id} rows={6} defaultValue={config.rouletteOptions.join('\n')} onChange={e=>{const options=e.target.value.split('\n').map(s=>s.trim()).filter(Boolean);if(options.length>=2)update('rouletteOptions',options)}}/></label>}
       {id==='habit-stamps'&&<label className="multiline-field">My daily habits <span>줄바꿈으로 구분, 최대 7개</span><textarea key={id} rows={5} defaultValue={config.habits.join('\n')} onChange={e=>{const items=e.target.value.split('\n').map(s=>s.trim()).filter(Boolean);if(items.length)update('habits',items)}}/></label>}
       </div>
       <button className="reset-button" onClick={()=>setConfig(c=>({...defaultConfig,instanceId:c.instanceId}))}>↺ Reset to defaults</button>
     </div>}</section>
-    <section className="preview-column"><div className="preview-top"><div><span className="live-dot"/> LIVE PREVIEW</div><span>YOUR WIDGET</span></div><div className="builder-preview-area"><WidgetRenderer key={`${id}:${config.instanceId}`} id={id} config={config}/></div><div className="embed-link-box"><div className="embed-link-head"><div><strong>Ready to embed?</strong><span>완성된 위젯 URL을 복사해 노션에 붙여넣으세요.</span></div><div className="link-illustration">↗</div></div><div className="link-input"><input type="text" value={url} readOnly aria-label="위젯 임베드 URL" onFocus={e=>e.target.select()}/><button onClick={copy}><Copy size={15}/> {copied?'Copied!':'Copy link'}</button></div>{copyError&&<p className="copy-warning" role="alert">{copyError}</p>}<a href={url} target="_blank" rel="noreferrer">Open standalone widget <ExternalLink size={14}/></a><p className="storage-disclaimer">링크에는 공개 가능한 설정만 담으세요. Notion 연결에는 임베드 화면에서도 개인 접근 키 입력이 필요하며, 인증 토큰은 URL에 포함되지 않습니다.</p></div></section></div><Footer/></div>
+    <section className="preview-column"><div className="preview-top"><div><span className="live-dot"/> LIVE PREVIEW</div><span>YOUR WIDGET</span></div><div className="builder-preview-area"><WidgetRenderer key={`${id}:${config.instanceId}`} id={id} config={config}/></div>{id==='mini-charts'&&config.chartSource==='notion'&&<><PublishBox config={config}/><SavedChartsManager/></>}<div className="embed-link-box"><div className="embed-link-head"><div><strong>Ready to embed?</strong><span>{id==='mini-charts'&&config.chartSource==='notion'?'이 주소는 비공개 미리보기용입니다. 공개 링크는 바로 위에서 생성하세요.':'완성된 위젯 URL을 복사해 노션에 붙여넣으세요.'}</span></div><div className="link-illustration">↗</div></div><div className="link-input"><input type="text" value={url} readOnly aria-label="위젯 임베드 URL" onFocus={e=>e.target.select()}/><button onClick={copy}><Copy size={15}/> {copied?'Copied!':'Copy link'}</button></div>{copyError&&<p className="copy-warning" role="alert">{copyError}</p>}<a href={url} target="_blank" rel="noreferrer">Open standalone widget <ExternalLink size={14}/></a><p className="storage-disclaimer">수동 차트는 바로 임베드할 수 있습니다. Notion DB 차트의 경우 아래 공유 관리에서 스냅샷을 명시적으로 공개해야 노션 앱 안에서 로그인 없이 표시됩니다.</p></div></section></div><Footer/></div>
 }
 function Embed({id,query}:{id:WidgetId;query:string}){
   const config=decodeConfig(new URLSearchParams(query).get('config'))
@@ -91,10 +92,11 @@ function Embed({id,query}:{id:WidgetId;query:string}){
 }
 export default function App(){const route=useRoute();const [menu,setMenu]=useState(false)
   if(route.page==='embed')return <Embed id={route.id} query={route.query}/>
-  const title=route.page==='home'?'Explore':route.page==='missing'?'Page not found':widgetById(route.id).name
+  const title=route.page==='home'?'Explore':route.page==='missing'?'Page not found':route.page==='oauth'?'Notion OAuth':widgetById(route.id).name
   const active=route.page==='home'?route.category:'All widgets'
   return <div className="app-layout"><div className={`sidebar-overlay ${menu?'overlay-on':''}`} onClick={()=>setMenu(false)}/><div className={`sidebar-wrap ${menu?'sidebar-open':''}`}><Sidebar active={active} close={()=>setMenu(false)}/></div><main className="main-area"><Header title={title} onMenu={()=>setMenu(true)}/><div className="page-content">
     {route.page==='home'&&<Gallery category={route.category}/ >}
+    {route.page==='oauth'&&<OAuthFinish ticket={route.ticket}/>}
     {route.page==='detail'&&<Detail id={route.id}/>}
     {route.page==='builder'&&<Builder key={route.id} id={route.id}/>}
     {route.page==='missing'&&<div className="not-found"><WandSparkles size={40}/><h1>이 위젯은 아직 없어요.</h1><a href="#/" className="primary-button">갤러리로 돌아가기 <ArrowRight size={16}/></a></div>}
