@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Check, ExternalLink, LockKeyhole, LogOut, RefreshCcw, ShieldCheck } from 'lucide-react'
-import { API_BASE, beginNotionAuth, disconnect, fetchChart, fetchPublicChart, fetchSchema, fetchSources, logout, publishChart, saveChart, unpublishChart, useSessionToken, workspaces, savedCharts, refreshChart } from './api'
+import { API_BASE, beginNotionAuth, disconnect, fetchChart, fetchPublicChart, fetchSchema, fetchSources, logout, publishChart, saveChart, unpublishChart, useSessionToken, workspaces, savedCharts } from './api'
 import type { ChartResponse, ConnectedSource, NotionField, PublishedChart, Workspace, SavedChart } from './api'
 import type { ConnectedChartConfig, WidgetConfig } from '../../lib/config'
 import { defaultConfig, defaultConnectedChart, embedUrl } from '../../lib/config'
@@ -80,10 +80,21 @@ export function ConnectedChartFrame({config,render}:{config:WidgetConfig;render:
   const token=useSessionToken()
   const {result,error,loading,reload}=useConnectedData(config.connected)
   const [publicResult,setPublicResult]=useState<PublishedChart|null>(null),[publicError,setPublicError]=useState('')
-  useEffect(()=>{if(!id)return;let active=true;fetchPublicChart(id).then(r=>{if(active)setPublicResult(r)}).catch(e=>{if(active)setPublicError(e.message)});return()=>{active=false}},[id])
-  if(id)return <div className="connected-runtime">{publicError&&<p role="alert" className="connected-error">{publicError}</p>}{publicResult?render(publicResult):<div className="connected-empty">{publicError||'공유 집계값을 불러오는 중...'}</div>}{publicResult&&<div className="connected-foot">공개 스냅샷 · {new Date(publicResult.updatedAt).toLocaleString('ko-KR')} 기준 · 자동 갱신되지 않음</div>}</div>
+  useEffect(()=>{
+    if(!id)return
+    let active=true,timer:number|undefined
+    setPublicResult(null);setPublicError('')
+    const refresh=async()=>{
+      try{const next=await fetchPublicChart(id);if(active){setPublicResult(next);setPublicError('')}}
+      catch(e){if(active){setPublicResult(null);setPublicError((e as Error).message)}}
+      finally{if(active)timer=window.setTimeout(()=>void refresh(),60000)}
+    }
+    void refresh()
+    return()=>{active=false;clearTimeout(timer)}
+  },[id])
+  if(id)return <div className="connected-runtime">{publicError&&<p role="alert" className="connected-error">{publicError}</p>}{publicResult?render(publicResult):<div className="connected-empty">{publicError?'차트를 표시할 수 없습니다.':'Notion 최신 집계값을 불러오는 중...'}</div>}{publicResult&&<div className="connected-foot">Notion 실시간 연동 · {new Date(publicResult.updatedAt).toLocaleString('ko-KR')} 조회 · 60초마다 자동 갱신</div>}</div>
   if(!API_BASE)return <div className="connected-alert">Notion API 연결 주소가 설정되지 않았습니다.</div>
-  if(!token)return <div className="connected-runtime"><div className="connected-alert"><LockKeyhole size={18}/> 비공개 차트입니다. 임베드에서는 자동 로그인을 지원하지 않습니다.</div><p>Widget Playground의 차트 Builder를 새 창에서 열고 Notion을 연결해 확인하세요.</p><a href={`${location.origin}${location.pathname}#/build/mini-charts`} target="_blank" rel="noreferrer">Builder에서 열기 <ExternalLink size={14}/></a></div>
+  if(!token)return <div className="connected-runtime"><div className="connected-alert"><LockKeyhole size={18}/> 비공개 차트입니다. 임베드에서는 자동 로그인을 지원하지 않습니다.</div><p>Builder의 공유 관리에서 실시간 공유를 허용하고 공개 링크를 복사해 Notion 임베드 주소를 교체하세요. 계정 연결만으로는 비공개 주소가 공개되지 않습니다.</p><a href={`${location.origin}${location.pathname}#/build/mini-charts`} target="_blank" rel="noreferrer">Builder에서 열기 <ExternalLink size={14}/></a></div>
   return <div className="connected-runtime"><div className="connected-runtime-status"><span><ShieldCheck size={13}/> Notion DB · Private</span><button type="button" onClick={reload} disabled={loading}><RefreshCcw size={14}/> {loading?'불러오는 중':'새로고침'}</button></div>{error&&<p className="connected-error" role="alert">{error}</p>}{result?render(result):<div className="connected-empty">{loading?'Notion 데이터를 집계하는 중...':'차트 설정을 확인해 주세요.'}</div>}{result&&<div className="connected-foot">{result.recordCount}건 집계 · {new Date(result.updatedAt).toLocaleString('ko-KR')}</div>}</div>
 }
 export function PublishBox({config}:{config:WidgetConfig}){
@@ -95,24 +106,26 @@ export function PublishBox({config}:{config:WidgetConfig}){
   const run=async(action:()=>Promise<void>)=>{setBusy(true);setError('');try{await action()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
   return <div className="connected-publish">
     <h3>Connected Chart · 공유 관리</h3>
-    <p>개인용 차트는 기본 비공개야. 노션 앱에서 로그인 없이 표시하려면 <strong>집계 결과 스냅샷</strong>을 공개해야 해.</p>
+    <p>차트는 기본 비공개입니다. Notion에 임베드하려면 <strong>최신 집계값의 실시간 공유</strong>를 허용하세요. 원본 행과 OAuth 토큰은 공개하지 않습니다.</p>
     {!id&&<button disabled={busy||!config.connected.sourceKey} type="button" onClick={()=>void run(async()=>{const w=await saveChart(config.connected,config.chartType,'Connected Mini Chart');setId(w.id)})}>① 차트 비공개 저장</button>}
-    {id&&status==='private'&&<><label className="connected-public-confirm"><input type="checkbox" checked={confirmPublic} onChange={e=>setConfirmPublic(e.target.checked)}/> 항목 이름, 수치 및 집계값이 링크를 가진 누구에게나 공개될 수 있음을 이해했습니다.</label><button type="button" disabled={busy||!confirmPublic} onClick={()=>void run(async()=>{await publishChart(id);setStatus('public')})}>② 공개 집계 스냅샷 생성</button></>}
-    {id&&status==='public'&&<><p className="connected-help">현재 차트 설정을 집계한 시점의 데이터만 공개돼. DB를 수정해도 스냅샷은 자동 갱신되지 않아.</p><label className="connected-field"><span>공개 임베드 URL</span><input readOnly value={publishedUrl} onFocus={e=>e.target.select()}/></label><button type="button" onClick={()=>navigator.clipboard.writeText(publishedUrl).catch(()=>setError('주소를 직접 복사해 주세요.'))}>공개 링크 복사</button><button type="button" disabled={busy} onClick={()=>void run(async()=>{await unpublishChart(id);setStatus('private');setConfirmPublic(false)})}>공유 해제</button></>}
+    {id&&status==='private'&&<><label className="connected-public-confirm"><input type="checkbox" checked={confirmPublic} onChange={e=>setConfirmPublic(e.target.checked)}/> 앞으로 변경되는 그룹명과 최신 집계값도 링크를 가진 누구에게나 계속 공개됨에 동의합니다.</label><button type="button" disabled={busy||!confirmPublic} onClick={()=>void run(async()=>{await publishChart(id);setStatus('public')})}>② 실시간 공유 허용</button></>}
+    {id&&status==='public'&&<><p className="connected-help">임베드는 Notion DB를 조회해 최신 값을 표시하고 60초마다 자동 갱신합니다. 아래 공개 링크를 Notion에 붙여넣으세요.</p><label className="connected-field"><span>실시간 공개 임베드 URL</span><input readOnly value={publishedUrl} onFocus={e=>e.target.select()}/></label><button type="button" onClick={()=>navigator.clipboard.writeText(publishedUrl).catch(()=>setError('주소를 직접 복사해 주세요.'))}>공개 링크 복사</button><button type="button" disabled={busy} onClick={()=>void run(async()=>{await unpublishChart(id);setStatus('private');setConfirmPublic(false)})}>공유 해제</button></>}
     {id&&status==='private'&&<p className="connected-help">비공개 저장됨 · 아직 공개 링크가 없습니다.</p>}
     {error&&<p className="connected-error" role="alert">{error}</p>}
   </div>
 }
 
 export function SavedChartsManager(){
-  const token=useSessionToken(),[items,setItems]=useState<SavedChart[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState('')
+  const token=useSessionToken(),[items,setItems]=useState<SavedChart[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(''),[consentId,setConsentId]=useState('')
   const load=useCallback(()=>{if(!token)return;savedCharts().then(setItems).catch(e=>setError(e.message))},[token])
   useEffect(()=>{load()},[load])
   if(!token)return null
-  const act=async(id:string,op:'refresh'|'revoke')=>{setBusy(id);setError('');try{if(op==='refresh')await refreshChart(id);else await unpublishChart(id);load()}catch(e){setError((e as Error).message)}finally{setBusy('')}}
+  const act=async(id:string,op:'publish'|'revoke')=>{setBusy(id);setError('');try{if(op==='publish')await publishChart(id);else await unpublishChart(id);setConsentId('');load()}catch(e){setError((e as Error).message)}finally{setBusy('')}}
   return <section className="connected-publish" aria-label="저장한 차트 관리"><h3>내가 저장한 차트</h3><button type="button" onClick={load}>목록 새로고침</button>
     {items.length===0&&<p className="connected-help">저장한 차트가 없습니다.</p>}
-    {items.map(item=><div key={item.id} className="connected-saved-item"><strong>{item.title}</strong><span>{item.visibility==='public'?'공개 스냅샷':'비공개'}</span><div className="connected-saved-actions">{item.visibility==='public'&&<><button type="button" onClick={()=>{const url=embedUrl('mini-charts',{...defaultConfig,chartSource:'notion',chartType:item.chart_type as WidgetConfig['chartType'],connected:defaultConnectedChart},location.origin,location.pathname)+'&shared='+encodeURIComponent(item.id);navigator.clipboard.writeText(url).catch(()=>setError('링크를 복사하지 못했습니다.'))}}>공개 링크 복사</button><button type="button" disabled={busy===item.id} onClick={()=>void act(item.id,'refresh')}>스냅샷 갱신</button><button type="button" disabled={busy===item.id} onClick={()=>void act(item.id,'revoke')}>공유 해제</button></>}</div></div>)}
+    {items.map(item=><div key={item.id} className="connected-saved-item"><strong>{item.title}</strong><span>{item.visibility==='public'?'실시간 공유 중':'비공개'}</span>
+      {item.visibility==='private'&&<label className="connected-public-confirm"><input type="checkbox" checked={consentId===item.id} onChange={e=>setConsentId(e.target.checked?item.id:'')}/> 앞으로 변경되는 그룹명과 최신 집계값도 링크를 가진 누구에게나 계속 공개됨에 동의합니다.</label>}
+      <div className="connected-saved-actions">{item.visibility==='public'?<><button type="button" onClick={()=>{const url=embedUrl('mini-charts',{...defaultConfig,chartSource:'notion',chartType:item.chart_type as WidgetConfig['chartType'],connected:defaultConnectedChart},location.origin,location.pathname)+'&shared='+encodeURIComponent(item.id);navigator.clipboard.writeText(url).catch(()=>setError('링크를 복사하지 못했습니다.'))}}>공개 링크 복사</button><button type="button" disabled={busy===item.id} onClick={()=>void act(item.id,'revoke')}>공유 해제</button></>:<button type="button" disabled={!!busy||consentId!==item.id} onClick={()=>void act(item.id,'publish')}>실시간 공유 허용</button>}</div></div>)}
     {error&&<p className="connected-error" role="alert">{error}</p>}
   </section>
 }

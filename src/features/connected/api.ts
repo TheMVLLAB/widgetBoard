@@ -22,7 +22,7 @@ export async function requestApi<T>(path:string,method:'GET'|'POST'='GET',payloa
   try{
     const response=await fetch(`${API_BASE}${path}`,{method,headers:{'Content-Type':'application/json',...(sessionToken?{Authorization:`Bearer ${sessionToken}`}:{})},...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:abort.signal,cache:'no-store'})
     const result=await response.json().catch(()=>null)
-    if(!response.ok){if(response.status===401&&!path.includes('/api/auth/ticket'))clearSession();throw new Error(result?.error||`API 응답 오류 (${response.status})`)}
+    if(!response.ok){if(response.status===401&&!path.includes('/api/auth/ticket')&&!path.startsWith('/api/public/'))clearSession();throw new Error(result?.error||`API 응답 오류 (${response.status})`)}
     return result as T
   }catch(err){if((err as Error).name==='AbortError')throw new Error('요청 시간이 초과되었습니다.');throw err}
   finally{clearTimeout(timeout)}
@@ -35,10 +35,9 @@ export async function fetchSources(){return (await requestApi<{sources:Connected
 export async function fetchSchema(key:string){return (await requestApi<{fields:NotionField[]}>(`/api/notion/data-sources/${encodeURIComponent(key)}/schema`)).fields}
 export async function fetchChart(config:ConnectedChartConfig){return requestApi<ChartResponse>('/api/widgets/charts/preview','POST',config)}
 export async function saveChart(config:ConnectedChartConfig,chartType:string,title:string){return requestApi<{id:string;visibility:string}>('/api/widgets','POST',{config,chartType,title})}
-export async function publishChart(id:string){return requestApi<{id:string;visibility:string}>('/api/widgets/'+encodeURIComponent(id)+'/publish','POST',{confirm:'PUBLISH_AGGREGATES'})}
+export async function publishChart(id:string){return requestApi<{id:string;visibility:string}>('/api/widgets/'+encodeURIComponent(id)+'/publish','POST',{confirm:'PUBLISH_LIVE_AGGREGATES'})}
 export async function unpublishChart(id:string){return requestApi<{visibility:string}>('/api/widgets/'+encodeURIComponent(id)+'/unpublish','POST',{})}
 export async function fetchPublicChart(id:string){return requestApi<PublishedChart>('/api/public/widgets/'+encodeURIComponent(id))}
 
 export type SavedChart={id:string;title:string;visibility:string;chart_type:string;updated_at:number}
 export async function savedCharts(){return (await requestApi<{widgets:SavedChart[]}>('/api/widgets')).widgets}
-export async function refreshChart(id:string){return requestApi('/api/widgets/'+encodeURIComponent(id)+'/refresh','POST',{})}
