@@ -12,7 +12,7 @@ export interface Env {
 }
 type Connection={id:string;user_id:string;workspace_id:string;workspace_name:string;bot_id:string;access_cipher:string;refresh_cipher:string}
 type Source={id:string;user_id:string;connection_id:string;source_id:string;title:string}
-type WidgetRow={id:string;user_id:string;source_grant_id:string;title:string;chart_type:string;config_json:string;visibility:string}
+type WidgetRow={id:string;user_id:string;source_grant_id:string;title:string;chart_type:string;config_json:string;visibility:string;snapshot_json:string|null}
 const API='https://api.notion.com/v1'
 const NOTION_VERSION='2026-03-11'
 const noStore={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'}
@@ -163,13 +163,9 @@ async function main(req:Request,env:Env){
   if(path.startsWith('/api/public/widgets/')&&req.method==='GET'){
     const id=path.split('/').pop()||''
     if(!pathPart(id))throw new ApiError('위젯을 찾을 수 없습니다.',404)
-    const row=await env.DB.prepare("SELECT * FROM widgets WHERE id=? AND visibility='public'").bind(id).first<WidgetRow>()
+    const row=await env.DB.prepare("SELECT snapshot_json,chart_type,title,snapshot_at FROM widgets WHERE id=? AND visibility='public' AND snapshot_json IS NOT NULL").bind(id).first<{snapshot_json:string;chart_type:string;title:string;snapshot_at:number}>()
     if(!row)throw new ApiError('비공개이거나 해제된 위젯입니다.',404)
-    await rateLimit(req,env,'public-chart',60)
-    const {result}=await chartAggregate(env,row.user_id,JSON.parse(row.config_json))
-    const stillPublic=await env.DB.prepare("SELECT id FROM widgets WHERE id=? AND visibility='public'").bind(id).first()
-    if(!stillPublic)throw new ApiError('공유가 해제된 위젯입니다.',404)
-    return send({title:row.title,chartType:row.chart_type,...result})
+    return send({title:row.title,chartType:row.chart_type,...JSON.parse(row.snapshot_json),updatedAt:new Date(row.snapshot_at*1000).toISOString()})
   }
   const userId=await sessionUser(req,env)
   if(path==='/api/auth/logout'&&req.method==='POST'){
@@ -211,15 +207,23 @@ async function main(req:Request,env:Env){
   const pub=path.match(/^\/api\/widgets\/([a-f0-9-]{36})\/publish$/i)
   if(pub&&req.method==='POST'){
     const row=await widgetOwner(env,userId,pub[1]);const payload=await bodyJson(req)
-    if(payload.confirm!=='PUBLISH_LIVE_AGGREGATES')throw new ApiError('최신 집계값의 지속적인 공개에 명시적으로 동의해야 합니다.')
+    if(payload.confirm!=='PUBLISH_AGGREGATES')throw new ApiError('집계 데이터 공개에 명시적으로 동의해야 합니다.')
     const {result}=await chartAggregate(env,userId,JSON.parse(row.config_json))
-    await env.DB.prepare("UPDATE widgets SET visibility='public',updated_at=? WHERE id=? AND user_id=?").bind(epoch(),row.id,userId).run()
-    return send({id:row.id,visibility:'public',recordCount:result.recordCount,notice:'Notion DB 변경 이후의 최신 수치와 그룹 이름도 링크를 가진 누구에게나 표시됩니다.'})
+    await env.DB.prepare("UPDATE widgets SET visibility='public',snapshot_json=?,snapshot_at=?,updated_at=? WHERE id=? AND user_id=?").bind(JSON.stringify(result),epoch(),epoch(),row.id,userId).run()
+    return send({id:row.id,visibility:'public',recordCount:result.recordCount,notice:'공개한 수치와 그룹 이름은 링크를 가진 누구에게나 표시됩니다.'})
+  }
+  const refresh=path.match(/^\/api\/widgets\/([a-f0-9-]{36})\/refresh$/i)
+  if(refresh&&req.method==='POST'){
+    const row=await widgetOwner(env,userId,refresh[1]);
+    const {result}=await chartAggregate(env,userId,JSON.parse(row.config_json))
+    // Only explicit refresh updates published snapshots; never return raw page content.
+    if(row.visibility==='public')await env.DB.prepare('UPDATE widgets SET snapshot_json=?,snapshot_at=?,updated_at=? WHERE id=? AND user_id=?').bind(JSON.stringify(result),epoch(),epoch(),row.id,userId).run()
+    return send({result,visibility:row.visibility})
   }
   const unpub=path.match(/^\/api\/widgets\/([a-f0-9-]{36})\/unpublish$/i)
   if(unpub&&req.method==='POST'){
     const row=await widgetOwner(env,userId,unpub[1])
-    await env.DB.prepare("UPDATE widgets SET visibility='private',updated_at=? WHERE id=? AND user_id=?").bind(epoch(),row.id,userId).run()
+    await env.DB.prepare("UPDATE widgets SET visibility='private',snapshot_json=NULL,snapshot_at=NULL,updated_at=? WHERE id=? AND user_id=?").bind(epoch(),row.id,userId).run()
     return send({ok:true,visibility:'private'})
   }
   return send({error:'찾을 수 없는 API입니다.'},404)

@@ -6,7 +6,6 @@ dist/
 coverage/
 .DS_Store
 .vite/
-.wrangler/
 
 .dev.vars
 worker/.dev.vars

@@ -1,27 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Eye, EyeOff, Leaf, Play, Pause, RotateCcw, Shuffle, Sparkles, Volume2 } from 'lucide-react'
 import type { WidgetConfig, WidgetId, ChartDatum } from '../lib/config'
-import { localDay, storageAvailable, useStoredState } from '../lib/storage'
+import { localDay, storageAvailable, useStoragePersistence, useStoredState } from '../lib/storage'
 import { dailyWordIndex, wordsForLevel } from '../data/words'
 import { ConnectedChartFrame } from '../features/connected/Connected'
 import type { ChartResponse } from '../features/connected/api'
 
-type Props = {id: WidgetId; config:WidgetConfig; embedded?:boolean}
-export function WidgetRenderer({id,config,embedded=false}:Props){
-  return <div className={`widget-frame widget-theme-${config.theme} widget-density-${config.density} ${embedded?'widget-embedded':''}`} style={{borderRadius:config.radius}}>
+type Props = {id: WidgetId; config:WidgetConfig; embedded?:boolean; templateMode?:boolean}
+export function WidgetRenderer({id,config,embedded=false,templateMode=false}:Props){
+  return <div className={`widget-frame widget-theme-${config.theme} widget-density-${config.density} ${embedded?'widget-embedded':''} ${config.showTitle?'':'widget-hide-kicker'} ${config.showBorder?'':'widget-no-border'} ${config.transparentBackground?'widget-transparent':''} ${config.motion==='reduce'?'widget-motion-reduce':''}`} style={{borderRadius:config.radius}}>
     {id==='daily-word'&&<DailyWord config={config}/>}
     {id==='flashcard'&&<Flashcards config={config}/>}
     {id==='focus-garden'&&<FocusGarden config={config}/>}
     {id==='habit-stamps'&&<HabitStamps config={config}/>}
     {id==='roulette'&&<Roulette config={config}/>}
-    {id==='mini-charts'&&(config.chartSource==='notion'?<ConnectedChartFrame config={config} render={(result:ChartResponse)=><MiniCharts config={config} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
+    {id==='mini-charts'&&(config.chartSource==='notion'&&!templateMode?<ConnectedChartFrame config={config} render={(result:ChartResponse)=><MiniCharts config={config} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
     {id==='smart-clock'&&<SmartClock config={config}/>}
   </div>
 }
 function WidgetKicker({name,tag}: {name:string;tag?:string}) {
   return <div className="widget-kicker"><span><Sparkles size={14}/> {name}</span>{tag&&<span className="tiny-label">{tag}</span>}</div>
 }
-function StorageNote(){const ok=useMemo(()=>storageAvailable(),[]);return ok?null:<div className="storage-note">이 환경에서는 로컬 기록 저장이 제한되어 있어요. 현재 열린 화면에서만 사용해 주세요.</div>}
+function StorageNote(){const persist=useStoragePersistence();const ok=useMemo(()=>persist?storageAvailable():false,[persist]);return !persist?<div className="storage-note">템플릿용 체험 링크에서는 개인 기록이 저장되지 않아요. 내 위젯 만들기에서 고유 링크를 생성할 수 있어요.</div>:ok?null:<div className="storage-note">이 환경에서는 로컬 기록 저장이 제한되어 있어요. 현재 열린 화면에서만 사용해 주세요.</div>}
 function DailyWord({config}: {config:WidgetConfig}) {
   const options=wordsForLevel(config.level)
   const day=localDay(config.timezone)

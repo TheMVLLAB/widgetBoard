@@ -2,6 +2,8 @@ export const ids = ['daily-word','flashcard','focus-garden','habit-stamps','roul
 export type WidgetId = typeof ids[number]
 export type Theme = 'cream' | 'mint' | 'dark'
 export type Density = 'compact' | 'comfort'
+export type EmbedLayout = 'compact' | 'standard' | 'wide'
+export type MotionPreference = 'system' | 'reduce'
 export type ChartType = 'bar'|'line'|'donut'
 export type ClockStyle = 'digital'|'analog'
 export type Level = 'easy' | 'medium' | 'advanced'
@@ -30,6 +32,11 @@ export type WidgetConfig = {
   density: Density
   radius: number
   instanceId: string
+  embedLayout: EmbedLayout
+  showTitle: boolean
+  showBorder: boolean
+  transparentBackground: boolean
+  motion: MotionPreference
   level: Level
   timezone: string
   examples: boolean
@@ -45,7 +52,8 @@ export type WidgetConfig = {
 }
 export const TIMEZONES = ['Asia/Seoul', 'Asia/Tokyo', 'Europe/Prague', 'Europe/London', 'America/New_York', 'UTC']
 export const defaultConfig: WidgetConfig = {
-  theme: 'cream', density: 'comfort', radius: 22, instanceId: 'default', level: 'medium', timezone: 'Asia/Seoul', examples: true,
+  theme: 'cream', density: 'comfort', radius: 22, instanceId: 'default',
+  embedLayout: 'standard', showTitle: true, showBorder: true, transparentBackground: false, motion: 'system', level: 'medium', timezone: 'Asia/Seoul', examples: true,
   timerMinutes: 25, chartType: 'bar', chartData: [{label:'월',value:42},{label:'화',value:68},{label:'수',value:52},{label:'목',value:89},{label:'금',value:76}],
   chartSource:'manual',connected:defaultConnectedChart,
   clockStyle: 'digital', clock24h: true,
@@ -70,6 +78,11 @@ export function sanitizeConfig(raw: unknown): WidgetConfig {
     density: oneOf(x.density,['compact','comfort'],d.density),
     radius: typeof x.radius==='number'&&Number.isFinite(x.radius) ? Math.min(32,Math.max(0,Math.round(x.radius))) : d.radius,
     instanceId: text(x.instanceId,50).replace(/[^\w-]/g,'') || d.instanceId,
+    embedLayout: oneOf(x.embedLayout,['compact','standard','wide'],d.embedLayout),
+    showTitle: typeof x.showTitle==='boolean'?x.showTitle:d.showTitle,
+    showBorder: typeof x.showBorder==='boolean'?x.showBorder:d.showBorder,
+    transparentBackground: typeof x.transparentBackground==='boolean'?x.transparentBackground:d.transparentBackground,
+    motion: oneOf(x.motion,['system','reduce'],d.motion),
     level: oneOf(x.level,['easy','medium','advanced'],d.level),
     timezone: oneOf(x.timezone,TIMEZONES,d.timezone),
     examples: typeof x.examples === 'boolean' ? x.examples : d.examples,
@@ -92,6 +105,16 @@ export function encodeConfig(config: WidgetConfig): string {
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')
+}
+export function validEmbedConfig(encoded: string | null): boolean {
+  if(!encoded)return true // unconfigured widgets are intentionally allowed
+  if(encoded.length>7000 || !/^[a-zA-Z0-9_-]+$/.test(encoded))return false
+  try{
+    const padded=encoded.replace(/-/g,'+').replace(/_/g,'/')
+    const raw=atob(padded+'='.repeat((4-padded.length%4)%4))
+    const decoded=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(raw,c=>c.charCodeAt(0))))
+    return Boolean(decoded && typeof decoded==='object' && !Array.isArray(decoded))
+  }catch{return false}
 }
 export function decodeConfig(encoded: string | null): WidgetConfig {
   if (!encoded || encoded.length>7000 || !/^[a-zA-Z0-9_-]+$/.test(encoded)) return sanitizeConfig(null)

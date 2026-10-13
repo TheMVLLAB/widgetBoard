@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, Clock3, Copy, ExternalLink, Gamepad2, Grid2X2, Heart, Leaf, Menu, MoveUpRight, Palette, Search, Settings2, SlidersHorizontal, WandSparkles, X } from 'lucide-react'
-import { defaultConfig, decodeConfig, embedUrl, isWidgetId, newInstanceId, sanitizeConfig, type ChartDatum, type WidgetConfig, type WidgetId } from './lib/config'
+import { defaultConfig, decodeConfig, embedUrl, isWidgetId, validEmbedConfig, newInstanceId, sanitizeConfig, type ChartDatum, type WidgetConfig, type WidgetId } from './lib/config'
+import { configFromPreset, decodeEmbedMode, makeTemplateConfig, templateEditorUrl, templateEmbedUrl } from './lib/embed'
+import { StoragePersistenceProvider } from './lib/storage'
 import { registry, widgetById } from './lib/registry'
 import { WidgetRenderer, WidgetThumbnail } from './widgets/Widgets'
 import { ConnectedSettings, OAuthFinish, PublishBox, SavedChartsManager } from './features/connected/Connected'
@@ -11,7 +13,7 @@ function routeFromHash():Route {
   // The standalone Notion URL uses a real query string because embedders may discard #fragments.
   const embedQuery = new URLSearchParams(location.search)
   const embeddedId = embedQuery.get('embed')
-  if (embeddedId && isWidgetId(embeddedId)) return {page:'embed', id:embeddedId,query:location.search.slice(1)}
+  if (embeddedId) return isWidgetId(embeddedId) ? {page:'embed', id:embeddedId,query:location.search.slice(1)} : {page:'missing'}
   const raw=location.hash.slice(1)||'/'
   const [path,query='']=raw.split('?')
   const parts=path.split('/').filter(Boolean)
@@ -31,7 +33,7 @@ function Sidebar({active,close}:{active:string;close:()=>void}){
     <div className="sidebar-bottom">MADE WITH <span>♥</span> FOR YOUR NOTION</div>
   </aside>
 }
-function Header({title,onMenu}:{title:string;onMenu:()=>void}){const [help,setHelp]=useState(false);return <><header className="topbar"><div className="topbar-left"><button className="mobile-menu" onClick={onMenu} aria-label="메뉴 열기"><Menu size={20}/></button><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{title}</strong></div><div className="topbar-right"><span className="version-pill"><span/> v0.3 OAUTH BETA</span><button aria-label="노션에 설치하는 방법" className="help-btn" onClick={()=>setHelp(true)}><CircleHelp size={19}/></button></div></header>
+function Header({title,onMenu}:{title:string;onMenu:()=>void}){const [help,setHelp]=useState(false);return <><header className="topbar"><div className="topbar-left"><button className="mobile-menu" onClick={onMenu} aria-label="메뉴 열기"><Menu size={20}/></button><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{title}</strong></div><div className="topbar-right"><span className="version-pill"><span/> v0.4 EMBED BETA</span><button aria-label="노션에 설치하는 방법" className="help-btn" onClick={()=>setHelp(true)}><CircleHelp size={19}/></button></div></header>
     {help&&<div role="presentation" className="modal-backdrop" onClick={()=>setHelp(false)}><section role="dialog" aria-modal="true" aria-label="노션 설치 안내" className="help-dialog" onClick={e=>e.stopPropagation()}><button className="dialog-close" onClick={()=>setHelp(false)} aria-label="닫기"><X size={20}/></button><div className="modal-icon">✳</div><h2>노션에 위젯 넣기</h2><ol><li>마음에 드는 위젯을 고르고 <b>Customize</b>를 눌러요.</li><li>색상과 내용을 설정한 뒤 <b>Copy embed link</b>를 눌러요.</li><li>노션에서 <b>/임베드</b> 블록을 추가하고 링크를 붙여넣어요.</li><li>블록 크기를 조절하면 끝!</li></ol><p>사용 기록은 브라우저별로 저장되며 일부 노션 환경에서는 저장이 제한될 수 있어요.</p><button className="primary-button" onClick={()=>setHelp(false)}>알겠어요 <Check size={16}/></button></section></div>}
   </>}
 function Gallery({category}:{category:string}){
@@ -57,15 +59,18 @@ function Detail({id}:{id:WidgetId}){
       <aside className="info-panel"><div className={`detail-icon thumb-${info.accent}`}>{info.emoji}</div><div className="overline">ABOUT THIS WIDGET</div><h2>{info.subtitle}</h2><p>{info.description}</p><div className="info-divider"/><strong className="panel-subtitle">WHAT YOU CAN DO</strong>{info.features.map(f=><div className="feature-row" key={f}><span><Check size={13}/></span>{f}</div>)}<div className="info-divider"/><div className="info-note">✨ 원하는 모습으로 꾸미고 URL 하나로 노션에 임베드할 수 있어요.</div><a className="outline-wide" href={`#/build/${id}`}>Open Widget Builder <SlidersHorizontal size={16}/></a></aside></div><Footer/></div>
 }
 function labeledChoice(label:string,value:string,opts:{value:string;label:string}[],fn:(v:string)=>void){return <label className="setting-field"><span>{label}</span><select value={value} onChange={e=>fn(e.target.value)}>{opts.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select><ChevronDown size={16}/></label>}
-function Builder({id}:{id:WidgetId}){
+function Builder({id,query}:{id:WidgetId;query:string}){
   const info=widgetById(id)
-  const [config,setConfig]=useState<WidgetConfig>(()=>({...defaultConfig,instanceId:newInstanceId()}))
+  const [config,setConfig]=useState<WidgetConfig>(()=>{const preset=new URLSearchParams(query).get('config');return preset?configFromPreset(preset):{...defaultConfig,instanceId:newInstanceId()}})
   const [copied,setCopied]=useState(false)
   const [expanded,setExpanded]=useState(true)
   const [copyError,setCopyError]=useState('')
+  const [previewMode,setPreviewMode]=useState<'personal'|'template'>('personal')
   const update=<K extends keyof WidgetConfig>(key:K,value:WidgetConfig[K])=>setConfig(c=>sanitizeConfig({...c,[key]:value}))
   const url=embedUrl(id,config,location.origin,location.pathname)
-  async function copy(){try{await navigator.clipboard.writeText(url);setCopied(true);setCopyError('');setTimeout(()=>setCopied(false),2400)}catch{setCopyError('자동 복사가 제한되었습니다. 아래 URL을 직접 복사해 주세요.')}}
+  const templateUrl=templateEmbedUrl(id,config,location.origin,location.pathname)
+  const templateConfig=makeTemplateConfig(config)
+  async function copy(target:string){try{await navigator.clipboard.writeText(target);setCopied(true);setCopyError('');setTimeout(()=>setCopied(false),2400)}catch{setCopyError('자동 복사가 제한되었습니다. 아래 URL을 직접 복사해 주세요.')}}
   function dataFromLines(s:string):ChartDatum[]{return s.split('\n').slice(0,8).map(line=>{const [label,v]=line.split(',');return {label:(label||'').trim().slice(0,20),value:Number(v)}}).filter(o=>o.label&&Number.isFinite(o.value)&&o.value>=0)}
   return <div className="inner-page builder-page"><a className="back-link" href={`#/widget/${id}`}><ArrowLeft size={17}/> Back to {info.name}</a><div className="builder-header"><div><span className="overline">WIDGET STUDIO / PERSONALIZE</span><h1>Make it yours <span>✳</span></h1><p>원하는 색과 내용으로 꾸미고, 노션에 넣을 링크를 복사하세요.</p></div><a href="#/" className="back-to-gallery">Explore more <ArrowRight size={16}/></a></div>
     <div className="builder-layout"><section className="builder-controls"><div className="control-title"><span className="builder-icon"><Settings2 size={19}/></span><div><strong>{info.name}</strong><small>Widget settings</small></div><button aria-label="설정 접기 또는 펼치기" onClick={()=>setExpanded(v=>!v)}><ChevronDown size={19} style={{transform:expanded?'':'rotate(-90deg)'}}/></button></div>{expanded&&<div className="controls-body">
@@ -81,16 +86,42 @@ function Builder({id}:{id:WidgetId}){
       {id==='roulette'&&<label className="multiline-field">Roulette choices <span>줄바꿈으로 구분, 최대 10개</span><textarea key={id} rows={6} defaultValue={config.rouletteOptions.join('\n')} onChange={e=>{const options=e.target.value.split('\n').map(s=>s.trim()).filter(Boolean);if(options.length>=2)update('rouletteOptions',options)}}/></label>}
       {id==='habit-stamps'&&<label className="multiline-field">My daily habits <span>줄바꿈으로 구분, 최대 7개</span><textarea key={id} rows={5} defaultValue={config.habits.join('\n')} onChange={e=>{const items=e.target.value.split('\n').map(s=>s.trim()).filter(Boolean);if(items.length)update('habits',items)}}/></label>}
       </div>
+      <div className="field-group embed-settings"><strong>NOTION EMBED <span>03</span></strong>
+        {labeledChoice('Embed layout',config.embedLayout,[{value:'compact',label:'Compact · 작은 열'},{value:'standard',label:'Standard · 일반 너비'},{value:'wide',label:'Wide · 넓은 대시보드'}],v=>update('embedLayout',v as WidgetConfig['embedLayout']))}
+        <label className="toggle-field"><span>Show widget heading</span><input type="checkbox" checked={config.showTitle} onChange={e=>update('showTitle',e.target.checked)}/></label>
+        <label className="toggle-field"><span>Show widget border</span><input type="checkbox" checked={config.showBorder} onChange={e=>update('showBorder',e.target.checked)}/></label>
+        <label className="toggle-field"><span>Transparent background</span><input type="checkbox" checked={config.transparentBackground} onChange={e=>update('transparentBackground',e.target.checked)}/></label>
+        <label className="toggle-field"><span>Reduce animations</span><input type="checkbox" checked={config.motion==='reduce'} onChange={e=>update('motion',e.target.checked?'reduce':'system')}/></label>
+      </div>
       <button className="reset-button" onClick={()=>setConfig(c=>({...defaultConfig,instanceId:c.instanceId}))}>↺ Reset to defaults</button>
     </div>}</section>
-    <section className="preview-column"><div className="preview-top"><div><span className="live-dot"/> LIVE PREVIEW</div><span>YOUR WIDGET</span></div><div className="builder-preview-area"><WidgetRenderer key={`${id}:${config.instanceId}`} id={id} config={config}/></div>
-      {id==='mini-charts'&&config.chartSource==='notion'?<><PublishBox config={config}/><SavedChartsManager/><p className="storage-disclaimer">Notion 임베드에는 공유 관리의 공개 링크를 사용하세요. 실시간 공유를 허용하면 최신 집계값이 60초마다 자동 갱신됩니다.</p></>:<div className="embed-link-box"><div className="embed-link-head"><div><strong>Ready to embed?</strong><span>완성된 위젯 URL을 복사해 노션에 붙여넣으세요.</span></div><div className="link-illustration">↗</div></div><div className="link-input"><input type="text" value={url} readOnly aria-label="위젯 임베드 URL" onFocus={e=>e.target.select()}/><button onClick={copy}><Copy size={15}/> {copied?'Copied!':'Copy link'}</button></div>{copyError&&<p className="copy-warning" role="alert">{copyError}</p>}<a href={url} target="_blank" rel="noreferrer">Open standalone widget <ExternalLink size={14}/></a><p className="storage-disclaimer">완성된 위젯 주소를 Notion 임베드에 붙여넣으세요.</p></div>}
-    </section></div><Footer/></div>
+    <section className="preview-column"><div className="preview-top"><div><span className="live-dot"/> LIVE NOTION PREVIEW</div><span>YOUR WIDGET</span></div>
+    <div className="embed-preview-switch" role="group" aria-label="미리보기 모드"><button type="button" aria-pressed={previewMode==='personal'} className={previewMode==='personal'?'is-active':''} onClick={()=>setPreviewMode('personal')}>내 위젯</button><button type="button" aria-pressed={previewMode==='template'} className={previewMode==='template'?'is-active':''} onClick={()=>setPreviewMode('template')}>템플릿 복제 화면</button></div>
+    <div className={`builder-preview-area preview-layout-${config.embedLayout}`}><div className="embed-preview-device"><StoragePersistenceProvider enabled={previewMode!=='template'}><WidgetRenderer key={`${id}:${config.instanceId}:${previewMode}`} id={id} config={previewMode==='template'?templateConfig:config} templateMode={previewMode==='template'}/></StoragePersistenceProvider>{previewMode==='template'&&<div className="preview-template-caption">{config.chartSource==='notion'&&id==='mini-charts'?'DEMO · 구매자의 데이터는 아직 연결되지 않았습니다.':'TEMPLATE MODE · 방문자의 학습 기록은 저장되지 않습니다.'}</div>}</div></div>
+    <p className="preview-footnote">실제 노션 임베드의 크기는 노션 블록에서 조절해요. 이 미리보기는 콘텐츠 너비와 동작을 확인하는 용도예요.</p>{id==='mini-charts'&&config.chartSource==='notion'&&<><PublishBox config={config}/><SavedChartsManager/></>}<div className="embed-link-box"><div className="embed-link-head"><div><strong>Ready to embed?</strong><span>일반 사용과 템플릿 복제용 주소를 구분해 주세요.</span></div><div className="link-illustration">↗</div></div>
+      {!(id==='mini-charts'&&config.chartSource==='notion')&&<div className="embed-link-type"><strong>내 위젯 링크</strong><p>개인 설정을 담은 일반 링크예요. 브라우저의 기록 저장 정책이 적용됩니다.</p><div className="link-input"><input type="text" value={url} readOnly aria-label="개인 위젯 URL" onFocus={e=>e.target.select()}/><button type="button" onClick={()=>void copy(url)}><Copy size={15}/> Copy</button></div></div>}
+      <div className="embed-link-type"><strong>템플릿 복제용 링크 · Recommended</strong><p>제작자 데이터 연결을 제거하고 개인 진행 기록을 저장하지 않아요. 복제한 사람은 언제든 자기 위젯으로 재설정할 수 있어요.</p><div className="link-input"><input type="text" value={templateUrl} readOnly aria-label="템플릿 복제용 임베드 URL" onFocus={e=>e.target.select()}/><button type="button" onClick={()=>void copy(templateUrl)}><Copy size={15}/> {copied?'Copied!':'Copy'}</button></div><a href={templateUrl} target="_blank" rel="noreferrer">템플릿 임베드 화면 보기 <ExternalLink size={14}/></a></div>
+      {id==='mini-charts'&&config.chartSource==='notion'&&<p className="embed-private-warning"><strong>Notion DB 연결 안내:</strong> 템플릿 링크에는 샘플 데이터만 포함돼요. 실제 데이터 공개는 아래 '공개 스냅샷' 관리에서 사용자가 직접 승인해야 해요. 비공개 DB 링크는 복제용으로 발급하지 않습니다.</p>}
+      {copyError&&<p className="copy-warning" role="alert">{copyError}</p>}
+      <div className="embed-install-guide"><strong>노션에 붙여넣기</strong><ol><li>템플릿 복제용 링크 복사</li><li>Notion 페이지에서 <kbd>/임베드</kbd> 입력</li><li>링크 붙여넣기 후 블록 크기 조절</li></ol></div>
+    </div></section></div><Footer/></div>
 }
 function Embed({id,query}:{id:WidgetId;query:string}){
-  const config=decodeConfig(new URLSearchParams(query).get('config'))
+  const params=new URLSearchParams(query)
+  const mode=decodeEmbedMode(params)
+  const valid=validEmbedConfig(params.get('config'))
+  const original=decodeConfig(params.get('config'))
+  const config=mode==='template'?makeTemplateConfig(original):original
+  const isDemo=mode==='template'&&id==='mini-charts'&&original.chartSource==='notion'
+  const customizeUrl=templateEditorUrl(id,config,location.origin,location.pathname)
   useEffect(()=>{document.body.classList.add('embed-body');return()=>document.body.classList.remove('embed-body')},[])
-  return <main className="embed-root"><WidgetRenderer id={id} config={config} embedded/></main>
+  return <main className={`embed-root embed-layout-${config.embedLayout}`}>
+    <StoragePersistenceProvider enabled={mode!=='template'}>
+      <div className="embed-surface">{!valid&&<div className="embed-invalid" role="status">설정 링크가 손상되어 기본 위젯을 표시하고 있어요. 새로운 링크를 만들려면 아래 설정 버튼을 눌러 주세요.</div>}<WidgetRenderer id={id} config={config} embedded templateMode={mode==='template'}/>
+        {mode==='template'&&<div className="embed-template-toolbar"><span>{isDemo?'예시 데이터 · 내 Notion DB 연결 필요':'무료 위젯 · 복제용 미리보기'}</span><a href={customizeUrl} target="_blank" rel="noopener noreferrer">내 위젯으로 설정 <ExternalLink size={13}/></a></div>}
+      </div>
+    </StoragePersistenceProvider>
+  </main>
 }
 export default function App(){const route=useRoute();const [menu,setMenu]=useState(false)
   if(route.page==='embed')return <Embed id={route.id} query={route.query}/>
@@ -100,7 +131,7 @@ export default function App(){const route=useRoute();const [menu,setMenu]=useSta
     {route.page==='home'&&<Gallery category={route.category}/ >}
     {route.page==='oauth'&&<OAuthFinish ticket={route.ticket}/>}
     {route.page==='detail'&&<Detail id={route.id}/>}
-    {route.page==='builder'&&<Builder key={route.id} id={route.id}/>}
+    {route.page==='builder'&&<Builder key={`${route.id}:${route.query}`} id={route.id} query={route.query}/>}
     {route.page==='missing'&&<div className="not-found"><WandSparkles size={40}/><h1>이 위젯은 아직 없어요.</h1><a href="#/" className="primary-button">갤러리로 돌아가기 <ArrowRight size={16}/></a></div>}
   </div></main></div>
 }

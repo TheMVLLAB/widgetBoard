@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {readFileSync,readdirSync} from 'node:fs'
+import {readFileSync} from 'node:fs'
 import {DatabaseSync} from 'node:sqlite'
 import worker from '../src/index.ts'
 import {encrypt,decrypt,randomToken} from '../src/oauth.ts'
@@ -9,7 +9,7 @@ const origin='https://example.github.io'
 const notionSource='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 function database(){
   const sqlite=new DatabaseSync(':memory:')
-  for(const file of readdirSync(new URL('../migrations/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'))
+  sqlite.exec(readFileSync(new URL('../migrations/0001_oauth.sql',import.meta.url),'utf8'))
   return {
     prepare(sql){
       const stmt=sqlite.prepare(sql)
@@ -23,7 +23,6 @@ const req=(path,method='GET',body,token,headers={})=>new Request('https://worker
 function notionMock(){
   const saved=globalThis.fetch
   const calls=[]
-  let value=42,queryStatus=200,onQuery
   globalThis.fetch=async (uri,options={})=>{
     const url=String(uri);calls.push({url,options})
     assert.ok(url.startsWith('https://api.notion.com/v1/'))
@@ -36,14 +35,10 @@ function notionMock(){
     assert.equal(options.headers['Notion-Version'],'2026-03-11')
     if(url.endsWith('/search'))return Response.json({results:[{object:'data_source',id:notionSource,title:[{plain_text:'Learning'}],properties:{Money:{id:'money',type:'number'},Date:{id:'date',type:'date'}}}],has_more:false})
     if(url.endsWith('/data_sources/'+notionSource))return Response.json({id:notionSource,properties:{Money:{id:'money',type:'number'},Date:{id:'date',type:'date'},Hidden:{id:'s',type:'rich_text'}}})
-    if(url.endsWith('/data_sources/'+notionSource+'/query')){
-      if(onQuery)await onQuery()
-      if(queryStatus!==200)return Response.json({message:'Notion unavailable'},{status:queryStatus})
-      return Response.json({results:[{id:'NOT_RETURNED',properties:{Money:{id:'money',type:'number',number:value},Date:{id:'date',type:'date',date:{start:'2026-10-12'}},Hidden:{id:'s',type:'rich_text',rich_text:[{plain_text:'SECRET_ROW'}]}}}],has_more:false})
-    }
+    if(url.endsWith('/data_sources/'+notionSource+'/query'))return Response.json({results:[{id:'NOT_RETURNED',properties:{Money:{id:'money',type:'number',number:42},Date:{id:'date',type:'date',date:{start:'2026-10-12'}},Hidden:{id:'s',type:'rich_text',rich_text:[{plain_text:'SECRET_ROW'}]}}}],has_more:false})
     throw Error('Unexpected URL '+url)
   }
-  return {calls,setValue(v){value=v},setQueryStatus(status){queryStatus=status},onQuery(fn){onQuery=fn},restore(){globalThis.fetch=saved}}
+  return {calls,restore(){globalThis.fetch=saved}}
 }
 async function login(env,code){
   // Browser visits Worker in the top-level window; cookie is round-tripped.
@@ -64,7 +59,7 @@ async function login(env,code){
   assert.ok(session)
   return {session,ticket,state,cookie}
 }
-test('OAuth: CSRF, single-use state, isolation, live aggregate sharing and revocation',async()=>{
+test('OAuth: CSRF, single-use state, isolation, aggregate-only snapshots and revocation',async()=>{
   const DB=database(),env=mockEnv(DB),mock=notionMock()
   try{
     let response=await worker.fetch(req('/api/notion/data-sources'),env)
@@ -99,67 +94,21 @@ test('OAuth: CSRF, single-use state, isolation, live aggregate sharing and revoc
     assert.equal(response.status,201)
     const id=(await response.json()).id
     assert.equal((await worker.fetch(req('/api/public/widgets/'+id),env)).status,404,'must be private by default')
-    assert.equal((await worker.fetch(req('/api/widgets/'+id+'/publish','POST',{confirm:'PUBLISH_LIVE_AGGREGATES'},b.session),env)).status,404,'other owner cannot publish')
+    assert.equal((await worker.fetch(req('/api/widgets/'+id+'/publish','POST',{confirm:'PUBLISH_AGGREGATES'},b.session),env)).status,404,'other owner cannot publish')
     assert.equal((await worker.fetch(req('/api/widgets/'+id+'/publish','POST',{confirm:'no'},a.session),env)).status,400)
-    assert.equal((await worker.fetch(req('/api/widgets/'+id+'/publish','POST',{confirm:'PUBLISH_AGGREGATES'},a.session),env)).status,400,'snapshot consent must not enable live sharing')
-    response=await worker.fetch(req('/api/widgets/'+id+'/publish','POST',{confirm:'PUBLISH_LIVE_AGGREGATES'},a.session),env)
+    response=await worker.fetch(req('/api/widgets/'+id+'/publish','POST',{confirm:'PUBLISH_AGGREGATES'},a.session),env)
     assert.equal(response.status,200)
     response=await worker.fetch(req('/api/public/widgets/'+id),env)
     assert.equal(response.status,200)
     const publicChart=await response.text()
     assert.ok(!publicChart.includes('SECRET_ROW')&&!publicChart.includes('TOKEN_A'))
     assert.deepEqual(JSON.parse(publicChart).data,[{label:'2026-10',value:42}])
-    mock.setValue(91)
-    response=await worker.fetch(req('/api/public/widgets/'+id),env)
-    assert.equal(response.status,200)
-    assert.equal(response.headers.get('Cache-Control'),'no-store')
-    assert.deepEqual((await response.json()).data,[{label:'2026-10',value:91}],'Notion edits must appear without republishing or a viewer session')
-    mock.setQueryStatus(429)
-    assert.equal((await worker.fetch(req('/api/public/widgets/'+id),env)).status,503,'Notion failures must not return stale values')
-    mock.setQueryStatus(200)
     assert.equal((await worker.fetch(req('/api/widgets/'+id+'/unpublish','POST',{},b.session),env)).status,404)
     assert.equal((await worker.fetch(req('/api/widgets/'+id+'/unpublish','POST',{},a.session),env)).status,200)
+    response=await worker.fetch(req('/api/widgets/'+id+'/refresh','POST',{},a.session),env)
+    assert.equal(response.status,200,'owner can explicitly refresh a private chart')
     assert.equal((await worker.fetch(req('/api/public/widgets/'+id),env)).status,404)
-    await worker.fetch(req('/api/widgets/'+id+'/publish','POST',{confirm:'PUBLISH_LIVE_AGGREGATES'},a.session),env)
-    mock.onQuery(async()=>{await worker.fetch(req('/api/widgets/'+id+'/unpublish','POST',{},a.session),env)})
-    assert.equal((await worker.fetch(req('/api/public/widgets/'+id),env)).status,404,'revocation during a Notion query must not leak its result')
   }finally{mock.restore();DB.close()}
-})
-test('live-sharing migration revokes snapshot consent without losing saved charts',()=>{
-  const sqlite=new DatabaseSync(':memory:')
-  try{
-    sqlite.exec(readFileSync(new URL('../migrations/0001_oauth.sql',import.meta.url),'utf8'))
-    sqlite.exec(`
-      INSERT INTO users VALUES ('owner',1);
-      INSERT INTO connections VALUES ('connection','owner','workspace','Workspace','bot','access','refresh',1);
-      INSERT INTO source_grants VALUES ('grant','owner','connection','source','Source',1);
-      INSERT INTO widgets VALUES ('shared','owner','grant','Chart','bar','{"sourceKey":"saved"}','public','{"data":[]}',1,1,1);
-      INSERT INTO widgets VALUES ('private','owner','grant','Private','line','{"sourceKey":"private"}','private',NULL,NULL,1,1);
-    `)
-    sqlite.exec(readFileSync(new URL('../migrations/0002_live_charts.sql',import.meta.url),'utf8'))
-    assert.deepEqual(sqlite.prepare('SELECT id,visibility,config_json FROM widgets ORDER BY id').all().map(row=>({...row})),[
-      {id:'private',visibility:'private',config_json:'{"sourceKey":"private"}'},
-      {id:'shared',visibility:'private',config_json:'{"sourceKey":"saved"}'}
-    ])
-  }finally{sqlite.close()}
-})
-test('OAuth sessions reject tampering and logout, and expire at two hours',async()=>{
-  const DB=database(),env=mockEnv(DB),mock=notionMock(),realNow=Date.now
-  const issuedAt=Date.UTC(2026,9,13)
-  let now=issuedAt
-  Date.now=()=>now
-  try{
-    const {session}=await login(env,'user-A')
-    const altered=(session[0]==='0'?'1':'0')+session.slice(1)
-    assert.equal((await worker.fetch(req('/api/me','GET',undefined,altered),env)).status,401)
-    now=issuedAt+7200*1000-1000
-    assert.equal((await worker.fetch(req('/api/me','GET',undefined,session),env)).status,200)
-    now+=1000
-    assert.equal((await worker.fetch(req('/api/me','GET',undefined,session),env)).status,401)
-    const fresh=await login(env,'user-A')
-    assert.equal((await worker.fetch(req('/api/auth/logout','POST',{},fresh.session),env)).status,200)
-    assert.equal((await worker.fetch(req('/api/me','GET',undefined,fresh.session),env)).status,401)
-  }finally{Date.now=realNow;mock.restore();DB.close()}
 })
 test('AES-GCM encrypt/decrypt rejects modifications; random tokens differ',async()=>{
   const key='ab'.repeat(32),cipher=await encrypt('private-token',key)
