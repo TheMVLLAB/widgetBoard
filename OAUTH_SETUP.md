@@ -1,19 +1,19 @@
 # Widget Playground v0.3 · Notion OAuth 개발 및 배포 가이드
 
-> 상태: **Worker 타입 검사·테스트 7개, 프론트엔드 테스트 6개·빌드 통과**. 실시간 집계로 전환했으며, 실제 브라우저·Worker HTTP 경로에서 로그인 없는 임베드의 60초 자동 갱신 및 공유 해제 후 표시 제거를 검증했습니다(인메모리 D1·모의 Notion 데이터). 실제 Notion 사용자 승인·DB 변경 및 노션 앱의 iframe 동작은 별도 확인이 필요합니다.
+> 상태: **실시간 연동 Worker·GitHub Pages 운영 배포 완료. Worker 타입 검사·테스트 7개, 프론트엔드 테스트 6개·빌드 통과**. 실제 브라우저·Worker HTTP 경로에서 로그인 없는 임베드의 60초 자동 갱신 및 공유 해제 후 표시 제거를 검증했습니다(인메모리 D1·모의 Notion 데이터). 운영 화면의 실시간 안내와 비공개 주소 복사 제거도 확인했습니다. 실제 Notion 사용자 승인·DB 변경 및 노션 앱의 iframe 동작은 별도 확인이 필요합니다.
 >
 > **비밀키를 GitHub, 이 채팅, `VITE_*` 변수나 임베드 주소에 기록하지 마세요.**
 >
 > 2026-10-13 실행 결과:
-> - D1 `widget-playground-oauth` 생성 완료. ID: `00f66ed8-ba60-4fc7-95ce-d4d70976501c`. `worker/wrangler.jsonc`에 반영하고 `0001_oauth.sql`을 로컬·운영에 적용했습니다.
+> - D1 `widget-playground-oauth` 생성 완료. ID: `00f66ed8-ba60-4fc7-95ce-d4d70976501c`. `worker/wrangler.jsonc`에 반영하고 `0001_oauth.sql`, `0002_live_charts.sql`을 로컬·운영에 적용했습니다.
 > - `worker/.dev.vars`에 입력된 OAuth Client ID/Secret을 운영 Worker에 등록했습니다. 운영 설정은 Git에서 제외되는 `worker/.env.production.local`에 저장했습니다. **운영 암호화 키는 로컬 개발 키와 별도로 생성했으며, 이 파일을 안전한 비밀 저장소에 백업하세요.** 키를 분실하거나 덮어쓰면 저장된 연결 토큰을 복원할 수 없습니다.
 > - 로컬 앱 `http://localhost:5173/`, Worker `http://localhost:8787/` 실행 확인. Mini Charts → Customize widget → Notion DB에서 연결 버튼과 비공개 안내를 확인했습니다. 로컬 Callback은 `http://localhost:8787/api/auth/notion/callback`이며 운영과 별도로 허용해야 합니다.
 > - GitHub Pages는 `https://themvllab.github.io/widgetBoard/`, Source는 GitHub Actions입니다. `VITE_NOTION_API_BASE`를 새 운영 API `https://widget-playground-notion.themvllab.workers.dev`로 변경했습니다. 이전 `https://widgetboard.themvllab.workers.dev`는 OAuth API로 사용하지 않습니다.
 > - 운영 Worker: `https://widget-playground-notion.themvllab.workers.dev`. `/api/health` 200(v0.3), OAuth 시작 302, 미인증 `/api/me` 401 및 Pages origin CORS를 확인했습니다. Notion 로그인 페이지까지 열었으며 실제 로그인·사용자 승인은 수행하지 않았습니다.
 > - Notion Developer Portal에 운영 Redirect URI **`https://widget-playground-notion.themvllab.workers.dev/api/auth/notion/callback`**를 등록해야 합니다. 운영 `FRONTEND_URL`은 `https://themvllab.github.io/widgetBoard/`입니다.
-> - GitHub Pages 프론트엔드 배포 완료. [Actions 실행 38333135557](https://github.com/TheMVLLAB/widgetBoard/actions/runs/38333135557)에서 테스트·타입 검사·빌드·Pages 배포가 모두 통과했습니다. [운영 Mini Charts Builder](https://themvllab.github.io/widgetBoard/#/build/mini-charts)에서 Notion DB 선택·연결 화면과 브라우저의 운영 Worker health 200을 확인하고, 연결 버튼으로 Notion 공식 승인 경로 이동을 확인했습니다. 이후 본인 계정으로 승인하고 DB 선택·차트 저장·공개/공유 해제를 확인하세요.
+> - 실시간 GitHub Pages 배포 완료. [Actions 실행 38334604173](https://github.com/TheMVLLAB/widgetBoard/actions/runs/38334604173)에서 테스트·타입 검사·빌드·Pages 배포가 모두 통과했습니다. [운영 Mini Charts Builder](https://themvllab.github.io/widgetBoard/#/build/mini-charts)의 Notion DB 모드에서 60초 자동 갱신 안내와 비공개 임베드 주소 복사 UI 제거를 확인했습니다. 이후 본인 계정으로 실시간 공유를 허용하고 Notion DB 변경 반영을 확인하세요.
 > - `.wrangler/` 런타임 DB·로그는 Git 추적에서 제거하고 ignore 처리했습니다. 과거 Git 기록은 삭제하지 않았습니다.
-> - 실시간 전환: `0002_live_charts.sql`은 기존 공개 스냅샷을 **비공개로 전환**하고 스냅샷 컬럼을 제거합니다. 차트 설정·OAuth 연결은 유지합니다. 기존 공유 사용자는 **내가 저장한 차트 → 최신 값 지속 공개 동의 → 실시간 공유 허용 → 공개 링크 복사**를 다시 수행하세요.
+> - 실시간 전환: `0002_live_charts.sql` 적용으로 기존 공개 스냅샷 1개를 **비공개로 전환**하고 스냅샷 컬럼을 제거했습니다. 차트 설정·OAuth 연결은 유지했습니다. 기존 공유 사용자는 **내가 저장한 차트 → 최신 값 지속 공개 동의 → 실시간 공유 허용 → 공개 링크 복사**를 다시 수행하세요. 실시간 Worker 운영 배포 버전: `fb51013e-9fc1-41eb-9e0f-4c529118cd32`.
 
 ## 기능 요약
 
