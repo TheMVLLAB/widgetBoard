@@ -4,7 +4,7 @@
 
 > New: see [`EMBED_V04.md`](EMBED_V04.md) for template-safe URL mode, preview workflow, buyer reconfiguration, security and limitations. An interactive **standalone UI demonstration** is available in [`embed-v0.4-preview.html`](embed-v0.4-preview.html); this preview is not the deployed React application. This is a development build pending actual Notion embed checks.
 
-**Small widgets. Big personality.** A playful collection of embeddable, interactive widgets for Notion, hosted on GitHub Pages. **v0.3 adds user-specific Notion OAuth connections, D1 storage and consent-based chart snapshots. Start with [OAUTH_SETUP.md](./OAUTH_SETUP.md).**
+**Small widgets. Big personality.** A playful collection of embeddable, interactive widgets for Notion, hosted on GitHub Pages. **Notion charts use user-specific OAuth connections, D1 storage and owner-only live embeds, without separate registration. Start with [OAUTH_SETUP.md](./OAUTH_SETUP.md).**
 
 ### Included in v0.1
 
@@ -68,7 +68,7 @@ The `?embed=...` query route renders **only the widget**, not the gallery UI. A 
 - `src/styles.css`: complete responsive styling and three widget themes.
 - `src/lib/config.test.ts`: data safety and deterministic word selection tests.
 
-The original seven local widget modes require no backend. **v0.4 adds template-safe embed links, a separate embed preview, responsive layout controls and stateless template-mode progress**. See [EMBED_V04.md](./EMBED_V04.md). **Notion chart mode in v0.3** uses a Notion Public Connection, OAuth 2.0, a Cloudflare Worker and D1. A private embed does not automatically authenticate in Notion. Explicitly published aggregate snapshots can be embedded without login. No Notion write-back is supported. See [OAUTH_SETUP.md](./OAUTH_SETUP.md).
+The original seven local widget modes require no backend. **v0.4 adds template-safe embed links, a separate embed preview, responsive layout controls and stateless template-mode progress**. See [EMBED_V04.md](./EMBED_V04.md). **Notion chart mode** uses a Notion Public Connection, OAuth 2.0, a Cloudflare Worker and D1. A private embed authenticates its owner through an external Notion OAuth window and a one-time verifier-bound handoff; the URL alone grants no data access. Saved charts query current Notion data. Public snapshot routes have been removed. No Notion write-back is supported. See [OAUTH_SETUP.md](./OAUTH_SETUP.md).
 
 ## Important limitations
 
@@ -89,7 +89,7 @@ The original seven local widget modes require no backend. **v0.4 adds template-s
 
 ## Roadmap
 
-Post-MVP ideas: Daily Quiz, Knowledge Capsule, Desktop Pet, Quote Collector, Goal Ring, automatic snapshot refresh with explicit opt-in, and cloud sync.
+Post-MVP ideas: Daily Quiz, Knowledge Capsule, Desktop Pet, Quote Collector, Goal Ring, and cloud sync.
 
 License: This project is a personal starter implementation; no license has been assigned. Add a license before accepting public contributions.
 

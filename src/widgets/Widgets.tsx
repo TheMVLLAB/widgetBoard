@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Eye, EyeOff, Leaf, Play, Pause, RotateCcw, Shuffle, Sparkles, Volume2 } from 'lucide-react'
-import type { WidgetConfig, WidgetId, ChartDatum } from '../lib/config'
+import type { WidgetConfig, WidgetId, ChartDatum, ChartType } from '../lib/config'
 import { localDay, storageAvailable, useStoragePersistence, useStoredState } from '../lib/storage'
 import { dailyWordIndex, wordsForLevel } from '../data/words'
 import { ConnectedChartFrame } from '../features/connected/Connected'
 import type { ChartResponse } from '../features/connected/api'
 
-type Props = {id: WidgetId; config:WidgetConfig; embedded?:boolean; templateMode?:boolean}
-export function WidgetRenderer({id,config,embedded=false,templateMode=false}:Props){
+type Props = {id: WidgetId; config:WidgetConfig; embedded?:boolean; templateMode?:boolean; savedWidgetId?:string}
+export function WidgetRenderer({id,config,embedded=false,templateMode=false,savedWidgetId}:Props){
   return <div className={`widget-frame widget-theme-${config.theme} widget-density-${config.density} ${embedded?'widget-embedded':''} ${config.showTitle?'':'widget-hide-kicker'} ${config.showBorder?'':'widget-no-border'} ${config.transparentBackground?'widget-transparent':''} ${config.motion==='reduce'?'widget-motion-reduce':''}`} style={{borderRadius:config.radius}}>
     {id==='daily-word'&&<DailyWord config={config}/>}
     {id==='flashcard'&&<Flashcards config={config}/>}
     {id==='focus-garden'&&<FocusGarden config={config}/>}
     {id==='habit-stamps'&&<HabitStamps config={config}/>}
     {id==='roulette'&&<Roulette config={config}/>}
-    {id==='mini-charts'&&(config.chartSource==='notion'&&!templateMode?<ConnectedChartFrame config={config} render={(result:ChartResponse)=><MiniCharts config={config} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
+    {id==='mini-charts'&&((config.chartSource==='notion'||(embedded&&savedWidgetId!==undefined))&&!templateMode?<ConnectedChartFrame config={config} embedded={embedded} widgetId={savedWidgetId} render={(result:ChartResponse,chartType:ChartType)=><MiniCharts config={{...config,chartType}} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
     {id==='smart-clock'&&<SmartClock config={config}/>}
   </div>
 }

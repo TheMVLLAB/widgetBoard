@@ -10,7 +10,7 @@ Widget Playground remains a **public widget library**. Notion templates are inde
 
 - **Embed settings** in the existing Builder: compact/standard/wide layout, heading, border, transparent background, reduced motion.
 - **Two preview modes**: personal widget vs. template-duplicate experience.
-- **Two link types** for regular widgets: individual embed and **template-safe embed**. A Notion-connected chart only exposes the template-safe demo link in the link area; explicit public snapshot links are managed separately.
+- **Two link types** for regular widgets: individual embed and **template-safe embed**. A Notion-connected chart uses a saved owner-only live embed; the template-safe link remains demo-only.
 - **Template-safe URL**: `?embed=<widget>&config=<encoded>&mode=template&v=1`. `mode=template` forces stateless browser behavior for progress widgets. Never treat it as an individual user's unique installation.
 - **Notion chart template-safe URL**: omits creator's Notion data-source keys and property IDs and renders only built-in demo data, even when the viewer is already authenticated. Users must click “내 위젯으로 설정” to connect their own DB in the external Builder.
 - **Standalone customization link**: `#/build/<widget>?config=<sanitized preset>` launches a new instance ID, preserving colors and safe settings but not creator access credentials.
@@ -24,7 +24,7 @@ Widget Playground remains a **public widget library**. Notion templates are inde
 3. In the preview switch, select **템플릿 복제 화면**. Confirm it looks good with demo data, or without saved progress.
 4. Copy **템플릿 복제용 링크**. Add it to the Notion template using `/임베드`.
 5. Duplicate the template into a separate test workspace and ensure that it contains neither the creator's Notion data nor their personal progress.
-6. For connected charts, leave the sample chart in the product. Tell buyers to click **내 위젯으로 설정**, approve Notion OAuth, choose their own DB, select and verify fields, then replace the sample embed URL with their own. Publishing an aggregated snapshot is **optional, explicit and publicly link-accessible**.
+6. For connected charts, leave the sample chart in the product. Tell buyers to click **내 위젯으로 설정**, authenticate their Notion account, choose their own DB, select fields, save a private chart, then replace the sample URL with their own saved-widget URL. The embedded chart authenticates its owner before showing current data; no public snapshot is created.
 
 ### Buyer UX by widget type
 
@@ -33,7 +33,7 @@ Widget Playground remains a **public widget library**. Notion templates are inde
 | Clock, daily vocabulary, roulette | Immediately usable with copied preset | Optional styling |
 | Focus Garden, Flashcards, Habit Stamps | Interactive but **no persistent progress** in template-mode URLs | Customize to generate a unique standard personal embed if persistence is needed; local storage may still be blocked in Notion |
 | Mini Charts (manual) | Uses authored non-private chart values | Optional personalization; do not put confidential numbers in a shareable URL |
-| Mini Charts (Notion) | Demo-only, no creator DB identifiers | OAuth + buyer's own DB + chart settings; explicit publishing for unauthenticated embed snapshots |
+| Mini Charts (Notion) | Demo-only, no creator DB identifiers | Notion OAuth + buyer's own DB + saved private chart; authenticate the owner in the embed |
 
 **Why no automatic per-buyer data?** Notion does not give an iframe a buyer's identity, workspace, database ID, or credentials when the template is duplicated. It also does not automatically rewrite embedded links. Never pretend an unchanged URL is an individual user-specific connection.
 
@@ -43,8 +43,8 @@ Widget Playground remains a **public widget library**. Notion templates are inde
 - OAuth tokens are never part of an embed URL. The existing v0.3 backend protects them behind Cloudflare Workers + D1.
 - Template mode disables use of localStorage for study progress to avoid shared-state surprises across copies of identical links. As a tradeoff, **the progress resets after reload**.
 - Individual links have distinct instance IDs when created from a template preset. Browser-local persistence is best-effort and may be blocked or partitioned by Notion web/desktop/mobile or the browser.
-- Connected non-template/private embeds require an authenticated user; there is no guarantee of OAuth/session compatibility inside Notion desktop/mobile. Open Builder outside Notion to connect and manage the chart.
-- Public snapshots reveal aggregated values to **anyone with the URL** and are not automatically updated. Choose them only for data safe to disclose publicly.
+- Connected private embeds require the saved widget's owner to authenticate through an external Notion OAuth window. A verifier-bound one-time handoff returns a session to the initiating iframe without depending on third-party cookies, shared browser storage, or popup `opener`. If storage is blocked, the session remains in memory and reload requires authentication again.
+- Private chart URLs contain only a saved widget ID and sanitized display settings, not DB/property IDs, records, or credentials. The server checks ownership on every live query. Copied URLs do not authorize another account. Public snapshot APIs have been removed; old public chart links no longer expose records.
 - This version contains no payment, purchase verification, automatic instance provisioning per template duplicate, account-based persistence for study widgets, or write-back to Notion blocks.
 - The normal URL can contain text entered by the author, so never store private information inside a shared widget's preset.
 
@@ -59,6 +59,9 @@ https://example.github.io/widget-playground/?embed=smart-clock&config=ENCODED&mo
 
 # Customize from template: new safe instance ID
 https://example.github.io/widget-playground/#/build/mini-charts?config=SANITIZED
+
+# Owner-only live chart: authenticate before viewing; ID alone grants no access
+https://example.github.io/widget-playground/?embed=mini-charts&config=DISPLAY_ONLY&widget=SAVED_WIDGET_UUID
 ```
 
 ## Run and validate
@@ -87,6 +90,6 @@ Deployment remains GitHub Pages for the React site and Cloudflare Worker/D1 for 
 - [ ] Builder creates a new state instance rather than reusing creator instance
 - [ ] Notion desktop/web/mobile render at compact, standard, wide embed sizes
 - [ ] Focus/keyboard operation and reduced-motion settings work
-- [ ] Real OAuth and public/private snapshot behavior tested only after secure backend deployment
+- [ ] Authenticate two real Notion accounts: only the saved widget owner can view its records; copied URLs and expired sessions must not reveal data
 
-**Current verification:** previous Cloudflare Worker tests and independent config/URL smoke tests passed here; full React build and actual Notion web/app integration have not yet been performed because npm dependency downloads failed in this environment.
+**Current verification:** Worker typecheck, 9 Worker tests, 16 frontend tests and the production React build passed. Chromium smoke exercised the actual UI and Worker with SQLite, substituting only the Notion API boundary: owner authentication, other-account denial, latest-value refresh, logout clearing, Builder configuration preservation, private link generation and a cross-site iframe with explicitly blocked sessionStorage. Actual Notion account approval and Notion desktop/mobile host behavior remain unverified.

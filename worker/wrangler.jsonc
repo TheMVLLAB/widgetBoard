@@ -1,12 +1,12 @@
 {
 	"$schema": "../node_modules/wrangler/config-schema.json",
-	"name": "widgetboard",
+	"name": "widget-playground-notion",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-10-12",
 	"workers_dev": true,
 	"d1_databases": [
 		{
-			"binding": "widgetboard",
+			"binding": "DB",
 			"database_name": "widgetboard",
 			"database_id": "3c8531dd-5c42-468f-b31a-5d2cf0f15217",
 			"remote": true

@@ -5,10 +5,10 @@ import { configFromPreset, decodeEmbedMode, makeTemplateConfig, templateEditorUr
 import { StoragePersistenceProvider } from './lib/storage'
 import { registry, widgetById } from './lib/registry'
 import { WidgetRenderer, WidgetThumbnail } from './widgets/Widgets'
-import { ConnectedSettings, OAuthFinish, PublishBox, SavedChartsManager } from './features/connected/Connected'
+import { ConnectedSettings, OAuthEmbedComplete, PrivateEmbedBox, SavedChartsManager } from './features/connected/Connected'
 import type { ConnectedChartConfig } from './lib/config'
 
-type Route={page:'home';category:string}|{page:'oauth';ticket:string}|{page:'detail'|'builder'|'embed';id:WidgetId;query:string}|{page:'missing'}
+type Route={page:'home';category:string}|{page:'oauth'}|{page:'detail'|'builder'|'embed';id:WidgetId;query:string}|{page:'missing'}
 function routeFromHash():Route {
   // The standalone Notion URL uses a real query string because embedders may discard #fragments.
   const embedQuery = new URLSearchParams(location.search)
@@ -18,7 +18,7 @@ function routeFromHash():Route {
   const [path,query='']=raw.split('?')
   const parts=path.split('/').filter(Boolean)
   if(!parts.length)return {page:'home',category:new URLSearchParams(query).get('category')||'All widgets'}
-  if(parts[0]==='auth'&&parts[1]==='complete')return {page:'oauth',ticket:new URLSearchParams(query).get('ticket')||''}
+  if(parts[0]==='auth'&&parts[1]==='embed'&&parts[2]==='complete')return {page:'oauth'}
   if(['widget','build','embed'].includes(parts[0])&&isWidgetId(parts[1]||''))return {page:parts[0]==='widget'?'detail':parts[0]==='build'?'builder':'embed',id:parts[1] as WidgetId,query}
   return {page:'missing'}
 }
@@ -98,10 +98,10 @@ function Builder({id,query}:{id:WidgetId;query:string}){
     <section className="preview-column"><div className="preview-top"><div><span className="live-dot"/> LIVE NOTION PREVIEW</div><span>YOUR WIDGET</span></div>
     <div className="embed-preview-switch" role="group" aria-label="미리보기 모드"><button type="button" aria-pressed={previewMode==='personal'} className={previewMode==='personal'?'is-active':''} onClick={()=>setPreviewMode('personal')}>내 위젯</button><button type="button" aria-pressed={previewMode==='template'} className={previewMode==='template'?'is-active':''} onClick={()=>setPreviewMode('template')}>템플릿 복제 화면</button></div>
     <div className={`builder-preview-area preview-layout-${config.embedLayout}`}><div className="embed-preview-device"><StoragePersistenceProvider enabled={previewMode!=='template'}><WidgetRenderer key={`${id}:${config.instanceId}:${previewMode}`} id={id} config={previewMode==='template'?templateConfig:config} templateMode={previewMode==='template'}/></StoragePersistenceProvider>{previewMode==='template'&&<div className="preview-template-caption">{config.chartSource==='notion'&&id==='mini-charts'?'DEMO · 구매자의 데이터는 아직 연결되지 않았습니다.':'TEMPLATE MODE · 방문자의 학습 기록은 저장되지 않습니다.'}</div>}</div></div>
-    <p className="preview-footnote">실제 노션 임베드의 크기는 노션 블록에서 조절해요. 이 미리보기는 콘텐츠 너비와 동작을 확인하는 용도예요.</p>{id==='mini-charts'&&config.chartSource==='notion'&&<><PublishBox config={config}/><SavedChartsManager/></>}<div className="embed-link-box"><div className="embed-link-head"><div><strong>Ready to embed?</strong><span>일반 사용과 템플릿 복제용 주소를 구분해 주세요.</span></div><div className="link-illustration">↗</div></div>
+    <p className="preview-footnote">실제 노션 임베드의 크기는 노션 블록에서 조절해요. 이 미리보기는 콘텐츠 너비와 동작을 확인하는 용도예요.</p>{id==='mini-charts'&&config.chartSource==='notion'&&<><PrivateEmbedBox config={config}/><SavedChartsManager/></>}<div className="embed-link-box"><div className="embed-link-head"><div><strong>Ready to embed?</strong><span>일반 사용과 템플릿 복제용 주소를 구분해 주세요.</span></div><div className="link-illustration">↗</div></div>
       {!(id==='mini-charts'&&config.chartSource==='notion')&&<div className="embed-link-type"><strong>내 위젯 링크</strong><p>개인 설정을 담은 일반 링크예요. 브라우저의 기록 저장 정책이 적용됩니다.</p><div className="link-input"><input type="text" value={url} readOnly aria-label="개인 위젯 URL" onFocus={e=>e.target.select()}/><button type="button" onClick={()=>void copy(url)}><Copy size={15}/> Copy</button></div></div>}
       <div className="embed-link-type"><strong>템플릿 복제용 링크 · Recommended</strong><p>제작자 데이터 연결을 제거하고 개인 진행 기록을 저장하지 않아요. 복제한 사람은 언제든 자기 위젯으로 재설정할 수 있어요.</p><div className="link-input"><input type="text" value={templateUrl} readOnly aria-label="템플릿 복제용 임베드 URL" onFocus={e=>e.target.select()}/><button type="button" onClick={()=>void copy(templateUrl)}><Copy size={15}/> {copied?'Copied!':'Copy'}</button></div><a href={templateUrl} target="_blank" rel="noreferrer">템플릿 임베드 화면 보기 <ExternalLink size={14}/></a></div>
-      {id==='mini-charts'&&config.chartSource==='notion'&&<p className="embed-private-warning"><strong>Notion DB 연결 안내:</strong> 템플릿 링크에는 샘플 데이터만 포함돼요. 실제 데이터 공개는 아래 '공개 스냅샷' 관리에서 사용자가 직접 승인해야 해요. 비공개 DB 링크는 복제용으로 발급하지 않습니다.</p>}
+      {id==='mini-charts'&&config.chartSource==='notion'&&<p className="embed-private-warning"><strong>Notion DB 연결 안내:</strong> 템플릿 링크에는 샘플 데이터만 포함돼요. 실제 차트는 위에서 저장한 비공개 링크를 사용하고, 임베드 화면에서 차트 소유자의 Notion 계정을 인증해야 볼 수 있습니다.</p>}
       {copyError&&<p className="copy-warning" role="alert">{copyError}</p>}
       <div className="embed-install-guide"><strong>노션에 붙여넣기</strong><ol><li>템플릿 복제용 링크 복사</li><li>Notion 페이지에서 <kbd>/임베드</kbd> 입력</li><li>링크 붙여넣기 후 블록 크기 조절</li></ol></div>
     </div></section></div><Footer/></div>
@@ -117,7 +117,7 @@ function Embed({id,query}:{id:WidgetId;query:string}){
   useEffect(()=>{document.body.classList.add('embed-body');return()=>document.body.classList.remove('embed-body')},[])
   return <main className={`embed-root embed-layout-${config.embedLayout}`}>
     <StoragePersistenceProvider enabled={mode!=='template'}>
-      <div className="embed-surface">{!valid&&<div className="embed-invalid" role="status">설정 링크가 손상되어 기본 위젯을 표시하고 있어요. 새로운 링크를 만들려면 아래 설정 버튼을 눌러 주세요.</div>}<WidgetRenderer id={id} config={config} embedded templateMode={mode==='template'}/>
+      <div className="embed-surface">{!valid&&<div className="embed-invalid" role="status">설정 링크가 손상되어 기본 위젯을 표시하고 있어요. 새로운 링크를 만들려면 아래 설정 버튼을 눌러 주세요.</div>}<WidgetRenderer id={id} config={config} embedded savedWidgetId={params.get('widget')??undefined} templateMode={mode==='template'}/>
         {mode==='template'&&<div className="embed-template-toolbar"><span>{isDemo?'예시 데이터 · 내 Notion DB 연결 필요':'무료 위젯 · 복제용 미리보기'}</span><a href={customizeUrl} target="_blank" rel="noopener noreferrer">내 위젯으로 설정 <ExternalLink size={13}/></a></div>}
       </div>
     </StoragePersistenceProvider>
@@ -125,11 +125,11 @@ function Embed({id,query}:{id:WidgetId;query:string}){
 }
 export default function App(){const route=useRoute();const [menu,setMenu]=useState(false)
   if(route.page==='embed')return <Embed id={route.id} query={route.query}/>
-  const title=route.page==='home'?'Explore':route.page==='missing'?'Page not found':route.page==='oauth'?'Notion OAuth':widgetById(route.id).name
+  if(route.page==='oauth')return <OAuthEmbedComplete/>
+  const title=route.page==='home'?'Explore':route.page==='missing'?'Page not found':widgetById(route.id).name
   const active=route.page==='home'?route.category:'All widgets'
   return <div className="app-layout"><div className={`sidebar-overlay ${menu?'overlay-on':''}`} onClick={()=>setMenu(false)}/><div className={`sidebar-wrap ${menu?'sidebar-open':''}`}><Sidebar active={active} close={()=>setMenu(false)}/></div><main className="main-area"><Header title={title} onMenu={()=>setMenu(true)}/><div className="page-content">
     {route.page==='home'&&<Gallery category={route.category}/ >}
-    {route.page==='oauth'&&<OAuthFinish ticket={route.ticket}/>}
     {route.page==='detail'&&<Detail id={route.id}/>}
     {route.page==='builder'&&<Builder key={`${route.id}:${route.query}`} id={route.id} query={route.query}/>}
     {route.page==='missing'&&<div className="not-found"><WandSparkles size={40}/><h1>이 위젯은 아직 없어요.</h1><a href="#/" className="primary-button">갤러리로 돌아가기 <ArrowRight size={16}/></a></div>}
