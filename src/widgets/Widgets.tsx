@@ -5,21 +5,22 @@ import { localDay, storageAvailable, useStoragePersistence, useStoredState } fro
 import { dailyWordIndex, wordsForLevel } from '../data/words'
 import { ConnectedChartFrame } from '../features/connected/Connected'
 import type { ChartResponse } from '../features/connected/api'
+import { LineChart } from './LineChart'
 
 type Props = {id: WidgetId; config:WidgetConfig; embedded?:boolean; templateMode?:boolean; savedWidgetId?:string}
 export function WidgetRenderer({id,config:baseConfig,embedded=false,templateMode=false,savedWidgetId}:Props){
   const configurable=embedded&&id==='mini-charts'&&savedWidgetId!==undefined&&!templateMode
-  const [savedDisplay,setDisplay]=useStoredState<Partial<Pick<WidgetConfig,'theme'|'density'|'chartType'>>>(`${savedWidgetId}:chart-display`,{})
+  const [savedDisplay,setDisplay]=useStoredState<Partial<Pick<WidgetConfig,'theme'|'chartType'>>>(`${savedWidgetId}:chart-display`,{})
   const display=configurable?savedDisplay:null
   const chartTypeOverride=display?.chartType&&['bar','line','donut'].includes(display.chartType)?display.chartType:undefined
-  const config={...baseConfig,theme:display?.theme&&['cream','mint','dark'].includes(display.theme)?display.theme:baseConfig.theme,density:display?.density&&['compact','comfort'].includes(display.density)?display.density:baseConfig.density}
-  return <div className={`widget-frame widget-theme-${config.theme} widget-density-${config.density} ${embedded?'widget-embedded':''} ${config.showTitle?'':'widget-hide-kicker'} ${config.showBorder?'':'widget-no-border'} ${config.transparentBackground?'widget-transparent':''} ${config.motion==='reduce'?'widget-motion-reduce':''}`} style={{borderRadius:config.radius}}>
+  const config={...baseConfig,theme:display?.theme&&['cream','mint','dark'].includes(display.theme)?display.theme:baseConfig.theme}
+  return <div className={`widget-frame widget-theme-${config.theme} ${embedded?'widget-embedded':''} ${config.showTitle?'':'widget-hide-kicker'} ${config.showBorder?'':'widget-no-border'} ${config.transparentBackground?'widget-transparent':''} ${config.motion==='reduce'?'widget-motion-reduce':''}`} style={{borderRadius:22}}>
     {id==='daily-word'&&<DailyWord config={config}/>}
     {id==='flashcard'&&<Flashcards config={config}/>}
     {id==='focus-garden'&&<FocusGarden config={config}/>}
     {id==='habit-stamps'&&<HabitStamps config={config}/>}
     {id==='roulette'&&<Roulette config={config}/>}
-    {id==='mini-charts'&&((config.chartSource==='notion'||(embedded&&savedWidgetId!==undefined))&&!templateMode?<ConnectedChartFrame config={config} embedded={embedded} widgetId={savedWidgetId} settings={configurable?chartType=><details className="connected-display-settings"><summary><Settings2 size={14}/> 위젯 설정</summary><div className="connected-display-fields"><label className="connected-field"><span>Color theme</span><select value={config.theme} onChange={e=>setDisplay(v=>({...v,theme:e.target.value as WidgetConfig['theme']}))}><option value="cream">Cream</option><option value="mint">Mint</option><option value="dark">Midnight</option></select></label><label className="connected-field"><span>Widget spacing</span><select value={config.density} onChange={e=>setDisplay(v=>({...v,density:e.target.value as WidgetConfig['density']}))}><option value="compact">Compact</option><option value="comfort">Comfort</option></select></label><label className="connected-field"><span>Chart type</span><select value={chartTypeOverride??chartType} onChange={e=>setDisplay(v=>({...v,chartType:e.target.value as ChartType}))}><option value="bar">Bar chart</option><option value="line">Line chart</option><option value="donut">Donut chart</option></select></label></div></details>:undefined} render={(result:ChartResponse,chartType:ChartType)=><MiniCharts config={{...config,chartType:chartTypeOverride??chartType}} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
+    {id==='mini-charts'&&((config.chartSource==='notion'||(embedded&&savedWidgetId!==undefined))&&!templateMode?<ConnectedChartFrame config={config} embedded={embedded} widgetId={savedWidgetId} settings={configurable?chartType=><details className="connected-display-settings"><summary><Settings2 size={14}/> 위젯 설정</summary><div className="connected-display-fields"><label className="connected-field"><span>Color theme</span><select value={config.theme} onChange={e=>setDisplay(v=>({...v,theme:e.target.value as WidgetConfig['theme']}))}><option value="cream">Cream</option><option value="mint">Mint</option><option value="dark">Midnight</option></select></label><label className="connected-field"><span>Chart type</span><select value={chartTypeOverride??chartType} onChange={e=>setDisplay(v=>({...v,chartType:e.target.value as ChartType}))}><option value="bar">Bar chart</option><option value="line">Line chart</option><option value="donut">Donut chart</option></select></label></div></details>:undefined} render={(result:ChartResponse,chartType:ChartType)=><MiniCharts config={{...config,chartType:chartTypeOverride??chartType}} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
     {id==='smart-clock'&&<SmartClock config={config}/>}
   </div>
 }
@@ -166,19 +167,13 @@ function ChartDrawing({data,type,active,onSelect}:{data:ChartDatum[];type:Widget
       </button>)}
     </div>
   }
-  if(type==='line'){
-    const pts=data.map((d,i)=>({x:40+(i*(280/Math.max(1,data.length-1))),y:162-((d.value-min)/Math.max(1,max-min))*125}))
-    return <div className="line-chart"><svg viewBox="0 0 360 200" role="img" aria-label="선 그래프"><line x1="26" y1="163" x2="337" y2="163" stroke="currentColor" opacity=".2"/><line x1="26" y1="100" x2="337" y2="100" stroke="currentColor" opacity=".1"/>
-      <polyline points={pts.map(p=>`${p.x},${p.y}`).join(' ')} stroke="var(--w-accent)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-      {pts.map((p,i)=><g key={i} role="button" tabIndex={0} onClick={()=>onSelect(i)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(i)}}} aria-label={`${data[i].label}: ${data[i].value}`}><circle cx={p.x} cy={p.y} r={active===i?8:5} fill={active===i?'#2b2b2b':'var(--w-accent)'} stroke="var(--w-bg)" strokeWidth="3"/><text x={p.x} y="187" textAnchor="middle" fontSize="12" fill="currentColor">{data[i].label.slice(0,5)}</text></g>)}
-    </svg></div>
-  }
   return <div className="bar-chart" role="img" aria-label="막대 그래프">{data.map((d,i)=><button key={i} onClick={()=>onSelect(i)} className={`bar-item ${active===i?'bar-active':''}`} aria-label={`${d.label}: ${d.value}`}><span className="bar-value">{active===i?d.value.toLocaleString():''}</span><span className="bar-track"><span style={{height:`${Math.max(4,Math.abs(d.value)/absMax*100)}%`,background:COLORS[i%COLORS.length],opacity:d.value<0?.65:1,border:d.value<0?'2px dashed #6e6777':'none'}}/></span><span className="bar-name">{d.label}</span></button>)}</div>
 }
 function MiniCharts({config,connectedData}:{config:WidgetConfig;connectedData?:ChartDatum[]}){
   const [active,setActive]=useState(0)
   const data=connectedData||config.chartData
   const total=data.reduce((sum,d)=>sum+d.value,0)
+  if(config.chartType==='line')return <div className="widget-body chart-widget"><WidgetKicker name="MINI CHARTS" tag="LINE"/>{data.length>0?<LineChart data={data} active={Math.min(active,data.length-1)} onSelect={setActive} connected={connectedData!==undefined}/>:<div className="connected-empty">조건에 맞는 데이터가 없습니다.</div>}</div>
   return <div className="widget-body chart-widget">
     <WidgetKicker name="MINI CHARTS" tag={config.chartType.toUpperCase()}/>
     <div className="chart-title"><div><h3>{connectedData?'Notion 데이터 요약':'이번 주의 기록'}</h3><span>{connectedData?'읽기 전용 집계 결과':'나의 데이터를 한눈에'}</span></div><div className="chart-total"><strong>{total.toLocaleString()}</strong><span>TOTAL</span></div></div>

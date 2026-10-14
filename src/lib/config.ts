@@ -1,7 +1,6 @@
 export const ids = ['daily-word','flashcard','focus-garden','habit-stamps','roulette','mini-charts','smart-clock'] as const
 export type WidgetId = typeof ids[number]
 export type Theme = 'cream' | 'mint' | 'dark'
-export type Density = 'compact' | 'comfort'
 export type EmbedLayout = 'compact' | 'standard' | 'wide'
 export type MotionPreference = 'system' | 'reduce'
 export type ChartType = 'bar'|'line'|'donut'
@@ -29,8 +28,6 @@ export function sanitizeConnected(raw:unknown):ConnectedChartConfig {
 }
 export type WidgetConfig = {
   theme: Theme
-  density: Density
-  radius: number
   instanceId: string
   embedLayout: EmbedLayout
   showTitle: boolean
@@ -52,7 +49,7 @@ export type WidgetConfig = {
 }
 export const TIMEZONES = ['Asia/Seoul', 'Asia/Tokyo', 'Europe/Prague', 'Europe/London', 'America/New_York', 'UTC']
 export const defaultConfig: WidgetConfig = {
-  theme: 'cream', density: 'comfort', radius: 22, instanceId: 'default',
+  theme: 'cream', instanceId: 'default',
   embedLayout: 'standard', showTitle: true, showBorder: true, transparentBackground: false, motion: 'system', level: 'medium', timezone: 'Asia/Seoul', examples: true,
   timerMinutes: 25, chartType: 'bar', chartData: [{label:'월',value:42},{label:'화',value:68},{label:'수',value:52},{label:'목',value:89},{label:'금',value:76}],
   chartSource:'manual',connected:defaultConnectedChart,
@@ -67,16 +64,14 @@ const text = (x: unknown, max: number) => typeof x === 'string' ? x.replace(/[\u
 export function sanitizeConfig(raw: unknown): WidgetConfig {
   const x = isObject(raw) ? raw : {}
   const d = defaultConfig
-  const chart = Array.isArray(x.chartData) ? x.chartData.filter(isObject).slice(0,8).map((item,i)=>({
+  const chart = Array.isArray(x.chartData) ? x.chartData.filter(isObject).slice(0,12).map((item,i)=>({
     label: text(item.label,20)||`항목 ${i+1}`,
-    value: typeof item.value==='number'&&Number.isFinite(item.value) ? Math.min(1e6, Math.max(0,item.value)) : 0
+    value: typeof item.value==='number'&&Number.isFinite(item.value) ? Math.min(1e6, Math.max(-1e6,item.value)) : 0
   })) : d.chartData
   const strings = (val:unknown, fallback:string[], max:number) => Array.isArray(val)
     ? val.slice(0,max).map(v=>text(v,35).trim()).filter(Boolean) : fallback
   return {
     theme: oneOf(x.theme,['cream','mint','dark'],d.theme),
-    density: oneOf(x.density,['compact','comfort'],d.density),
-    radius: typeof x.radius==='number'&&Number.isFinite(x.radius) ? Math.min(32,Math.max(0,Math.round(x.radius))) : d.radius,
     instanceId: text(x.instanceId,50).replace(/[^\w-]/g,'') || d.instanceId,
     embedLayout: oneOf(x.embedLayout,['compact','standard','wide'],d.embedLayout),
     showTitle: typeof x.showTitle==='boolean'?x.showTitle:d.showTitle,

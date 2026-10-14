@@ -24,10 +24,10 @@ export function LoginBox({compact=false,widgetId}:{compact?:boolean;widgetId?:st
   }
   if(!API_BASE)return <div className="connected-alert"><LockKeyhole size={18}/> 연동 API 주소를 아직 설정하지 않았습니다.</div>
   return <div className={`connected-login ${compact?'connected-login-compact':''}`}>
-    {!token&&<><ShieldCheck size={21}/><strong>내 Notion 계정 인증</strong><span>{widgetId?'차트를 저장한 본인의 Notion 계정만 볼 수 있어요. 복사한 링크만으로는 데이터에 접근할 수 없습니다.':'별도 회원가입이나 API 키가 필요 없어요. Notion에서 사용할 DB를 선택해 승인하면 됩니다.'}</span></>}
+    {!token&&<><div className="connected-login-heading"><ShieldCheck size={18}/><strong>내 Notion 계정 인증</strong></div><span>{widgetId?'차트를 저장한 본인의 계정만 볼 수 있어요. 복사한 링크만으로는 접근할 수 없습니다.':'별도 가입·API 키 없이, Notion에서 사용할 DB를 선택해 승인하세요.'}</span></>}
     {token&&<ConnectedAccount key={token}/>}
-    <button type="button" disabled={pending} onClick={()=>start(!token||!!widgetId)}>{pending?'인증 기다리는 중...':token&&!widgetId?'Notion 워크스페이스 추가':'기존 인증 연결'} <ExternalLink size={14}/></button>
-    {(!token||widgetId)&&<><p className="connected-help">이 브라우저의 인증이 유효하면 새 창에서 연결을 확인한 뒤 Notion 재승인 없이 연결됩니다. 인증이 없거나 만료되었으면 Notion 승인을 진행합니다.</p><button type="button" className="connected-subtle-button" disabled={pending} onClick={()=>start(false)}>Notion 계정 다시 인증 <ExternalLink size={14}/></button></>}
+    <button type="button" className="connected-primary-action" disabled={pending} onClick={()=>start(!token||!!widgetId)}>{pending?'인증 기다리는 중...':token&&!widgetId?'Notion 워크스페이스 추가':'기존 인증 연결'} <ExternalLink size={14}/></button>
+    {(!token||widgetId)&&<><p className="connected-help">기존 인증이 있으면 연결 확인만, 없거나 만료되면 Notion 승인을 진행해요.</p><button type="button" className="connected-reauth-action" disabled={pending} onClick={()=>start(false)}>Notion 계정 다시 인증 <ExternalLink size={12}/></button></>}
     {authUrl&&<a href={authUrl} target="_blank" rel="noopener noreferrer">같은 인증 요청을 새 창에서 열기 <ExternalLink size={14}/></a>}
     {pending&&<p className="connected-help" role="status">원래 화면을 유지한 채 인증 결과를 확인합니다. 최대 10분 동안 기다려요.</p>}
     {notice&&<p className="connected-help" role="status">{notice}</p>}

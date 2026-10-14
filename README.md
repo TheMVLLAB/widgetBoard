@@ -18,6 +18,20 @@
 
 Plus a responsive **Discover gallery**, working **detail previews**, **Widget Builder**, three themes, reusable registry, and embed-only pages.
 
+Widget spacing is fixed to the former **Compact** layout (18px × 20px padding, with narrower responsive padding in small embeds). Spacing and round-corner controls have been removed from the Builder and private chart display settings. Preview frames retain the default 22px corners; standalone embeds retain their existing surface styling. Old URLs remain readable, but their `density` and `radius` settings are ignored and omitted from new links. Embed layout widths remain configurable.
+
+### Line chart design
+
+Line charts use a cream-and-lavender momentum layout with a smooth SVG curve, a zero baseline, purple positive areas and coral negative areas. Mint and Midnight themes retain their own palette. Curves stay within adjacent data values rather than introducing artificial peaks. No chart dependency, blur filter or continuous animation is used.
+
+- Manual chart input accepts up to **12 ordered label/value pairs**, including negative values, bounded to ±1,000,000. Existing embed links keep the same format. Bar charts support signed values; donut charts show an explanation instead of displaying negative values.
+- **Net Change** is the last value minus the first. **Positive Points** counts values strictly greater than zero; it does not assume labels represent months.
+- Select a point by clicking or by focusing it and pressing Enter/Space. Full labels and values appear below the plot; axis labels are thinned to avoid crowding. Narrative annotations are not fabricated from numeric data.
+- Narrow embeds stack the summary cards; standalone embeds can be narrower than the gallery's 320px minimum. The Notion-backed chart uses the same renderer and keeps its existing authentication and data access contract.
+- Line chart headings, values, labels and body text use **Pretendard Variable 1.3.9**, loaded from jsDelivr with dynamic Unicode subsets and `font-display: swap`. If the CDN is unavailable, system sans-serif fonts are used; other widgets retain their existing fonts.
+- Verified locally in Chromium: 12 signed points, summary calculations, click/keyboard selection, single zero point, three themes, and a 310px iframe without horizontal overflow. Actual Notion clients and device performance have not been measured.
+
+
 ## Local development
 
 Requirements: Node.js 22 or newer and an internet connection for the first `npm install`.
@@ -77,7 +91,7 @@ The original seven local widget modes require no backend. **v0.4 adds template-s
 - The 63-word seed set is a first release sample, not a dictionary service. Pronunciation depends on `speechSynthesis` browser support and may be disabled by host permissions.
 - The Focus Garden counts a session **only when manually confirmed** after the timer ends. Background tabs and OS throttling affect animation, but elapsed time is re-evaluated from timestamps.
 - Public GitHub Pages deployment and actual Notion embed compatibility **must be checked on the user's devices**; build success alone cannot prove Notion client behavior.
-- System font fallbacks are used by default; no external font request is required.
+- Line charts request Pretendard CSS and glyph subsets from jsDelivr; all font stacks retain system fallbacks if the network is unavailable.
 - `offline-preview.html` is a self-contained UI preview, not the production React bundle.
 
 ## Add a new widget

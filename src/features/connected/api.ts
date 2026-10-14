@@ -31,7 +31,7 @@ if(typeof window!=='undefined'){
 export const isSavedWidgetId=(id:string)=>/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)
 export function privateEmbedUrl(id:string,config:WidgetConfig,origin:string,pathname:string){
   if(!isSavedWidgetId(id))throw new Error('저장한 차트 주소가 올바르지 않습니다.')
-  const display:WidgetConfig={...defaultConfig,theme:config.theme,density:config.density,radius:config.radius,embedLayout:config.embedLayout,showTitle:config.showTitle,showBorder:config.showBorder,transparentBackground:config.transparentBackground,motion:config.motion,chartSource:'notion',connected:defaultConnectedChart,chartData:defaultConfig.chartData}
+  const display:WidgetConfig={...defaultConfig,theme:config.theme,embedLayout:config.embedLayout,showTitle:config.showTitle,showBorder:config.showBorder,transparentBackground:config.transparentBackground,motion:config.motion,chartSource:'notion',connected:defaultConnectedChart,chartData:defaultConfig.chartData}
   return embedUrl('mini-charts',display,origin,pathname)+'&widget='+encodeURIComponent(id)
 }
 export type ConnectedSource={key:string;title:string;fieldCount:number;workspace:string}
