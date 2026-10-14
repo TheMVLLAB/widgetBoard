@@ -117,7 +117,7 @@ function Embed({id,query}:{id:WidgetId;query:string}){
   useEffect(()=>{document.body.classList.add('embed-body');return()=>document.body.classList.remove('embed-body')},[])
   return <main className={`embed-root embed-layout-${config.embedLayout}`}>
     <StoragePersistenceProvider enabled={mode!=='template'}>
-      <div className="embed-surface">{!valid&&<div className="embed-invalid" role="status">설정 링크가 손상되어 기본 위젯을 표시하고 있어요. 새로운 링크를 만들려면 아래 설정 버튼을 눌러 주세요.</div>}<WidgetRenderer id={id} config={config} embedded savedWidgetId={params.get('widget')??undefined} templateMode={mode==='template'}/>
+      <div className="embed-surface">{!valid&&<div className="embed-invalid" role="status">설정 링크가 손상되어 기본 위젯을 표시하고 있어요. 새로운 링크를 만들려면 아래 설정 버튼을 눌러 주세요.</div>}<WidgetRenderer key={params.get('widget')??id} id={id} config={config} embedded savedWidgetId={params.get('widget')??undefined} templateMode={mode==='template'}/>
         {mode==='template'&&<div className="embed-template-toolbar"><span>{isDemo?'예시 데이터 · 내 Notion DB 연결 필요':'무료 위젯 · 복제용 미리보기'}</span><a href={customizeUrl} target="_blank" rel="noopener noreferrer">내 위젯으로 설정 <ExternalLink size={13}/></a></div>}
       </div>
     </StoragePersistenceProvider>

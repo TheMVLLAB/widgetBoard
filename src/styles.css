@@ -64,3 +64,12 @@ body.embed-body{background:transparent}
 .embed-root .widget-frame{border:1px solid var(--w-line);border-radius:inherit;min-height:300px}
 .embed-root .widget-frame.widget-no-border{border:0!important}
 .embed-invalid{padding:12px;color:#78552f;background:#fff1d5;font:12px/1.7 system-ui,sans-serif}
+.connected-display-settings{margin-bottom:12px;border-bottom:1px solid var(--w-line);padding-bottom:10px}
+.connected-display-settings summary{display:flex;align-items:center;gap:6px;width:fit-content;cursor:pointer;font-size:11px;color:var(--w-fg);padding:6px 8px;border:1px solid var(--w-line);border-radius:7px;background:var(--w-surface)}
+.connected-display-settings summary:focus-visible{outline:2px solid var(--w-accent);outline-offset:3px}
+.connected-display-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:10px}
+.connected-display-fields .connected-field{color:var(--w-fg)}
+.connected-display-fields select{background:var(--w-surface);color:var(--w-fg);border-color:var(--w-line)}
+.widget-embedded.widget-density-compact .connected-runtime{padding:10px 12px 12px}
+.widget-embedded.widget-density-comfort .connected-runtime{padding:14px 20px 20px}
+.widget-embedded .connected-runtime .chart-widget{padding:7px 0}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Eye, EyeOff, Leaf, Play, Pause, RotateCcw, Shuffle, Sparkles, Volume2 } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Eye, EyeOff, Leaf, Play, Pause, RotateCcw, Settings2, Shuffle, Sparkles, Volume2 } from 'lucide-react'
 import type { WidgetConfig, WidgetId, ChartDatum, ChartType } from '../lib/config'
 import { localDay, storageAvailable, useStoragePersistence, useStoredState } from '../lib/storage'
 import { dailyWordIndex, wordsForLevel } from '../data/words'
@@ -7,14 +7,19 @@ import { ConnectedChartFrame } from '../features/connected/Connected'
 import type { ChartResponse } from '../features/connected/api'
 
 type Props = {id: WidgetId; config:WidgetConfig; embedded?:boolean; templateMode?:boolean; savedWidgetId?:string}
-export function WidgetRenderer({id,config,embedded=false,templateMode=false,savedWidgetId}:Props){
+export function WidgetRenderer({id,config:baseConfig,embedded=false,templateMode=false,savedWidgetId}:Props){
+  const configurable=embedded&&id==='mini-charts'&&savedWidgetId!==undefined&&!templateMode
+  const [savedDisplay,setDisplay]=useStoredState<Partial<Pick<WidgetConfig,'theme'|'density'|'chartType'>>>(`${savedWidgetId}:chart-display`,{})
+  const display=configurable?savedDisplay:null
+  const chartTypeOverride=display?.chartType&&['bar','line','donut'].includes(display.chartType)?display.chartType:undefined
+  const config={...baseConfig,theme:display?.theme&&['cream','mint','dark'].includes(display.theme)?display.theme:baseConfig.theme,density:display?.density&&['compact','comfort'].includes(display.density)?display.density:baseConfig.density}
   return <div className={`widget-frame widget-theme-${config.theme} widget-density-${config.density} ${embedded?'widget-embedded':''} ${config.showTitle?'':'widget-hide-kicker'} ${config.showBorder?'':'widget-no-border'} ${config.transparentBackground?'widget-transparent':''} ${config.motion==='reduce'?'widget-motion-reduce':''}`} style={{borderRadius:config.radius}}>
     {id==='daily-word'&&<DailyWord config={config}/>}
     {id==='flashcard'&&<Flashcards config={config}/>}
     {id==='focus-garden'&&<FocusGarden config={config}/>}
     {id==='habit-stamps'&&<HabitStamps config={config}/>}
     {id==='roulette'&&<Roulette config={config}/>}
-    {id==='mini-charts'&&((config.chartSource==='notion'||(embedded&&savedWidgetId!==undefined))&&!templateMode?<ConnectedChartFrame config={config} embedded={embedded} widgetId={savedWidgetId} render={(result:ChartResponse,chartType:ChartType)=><MiniCharts config={{...config,chartType}} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
+    {id==='mini-charts'&&((config.chartSource==='notion'||(embedded&&savedWidgetId!==undefined))&&!templateMode?<ConnectedChartFrame config={config} embedded={embedded} widgetId={savedWidgetId} settings={configurable?chartType=><details className="connected-display-settings"><summary><Settings2 size={14}/> 위젯 설정</summary><div className="connected-display-fields"><label className="connected-field"><span>Color theme</span><select value={config.theme} onChange={e=>setDisplay(v=>({...v,theme:e.target.value as WidgetConfig['theme']}))}><option value="cream">Cream</option><option value="mint">Mint</option><option value="dark">Midnight</option></select></label><label className="connected-field"><span>Widget spacing</span><select value={config.density} onChange={e=>setDisplay(v=>({...v,density:e.target.value as WidgetConfig['density']}))}><option value="compact">Compact</option><option value="comfort">Comfort</option></select></label><label className="connected-field"><span>Chart type</span><select value={chartTypeOverride??chartType} onChange={e=>setDisplay(v=>({...v,chartType:e.target.value as ChartType}))}><option value="bar">Bar chart</option><option value="line">Line chart</option><option value="donut">Donut chart</option></select></label></div></details>:undefined} render={(result:ChartResponse,chartType:ChartType)=><MiniCharts config={{...config,chartType:chartTypeOverride??chartType}} connectedData={result.data}/>}/>:<MiniCharts config={config}/>)}
     {id==='smart-clock'&&<SmartClock config={config}/>}
   </div>
 }

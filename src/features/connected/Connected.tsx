@@ -97,7 +97,7 @@ function useConnectedData(config:ConnectedChartConfig,widgetId:string|undefined,
   },[token,enabled,reload])
   return state.key===key&&token&&enabled?{...state,reload}:{result:null,chartType:null,error:'',loading:false,reload}
 }
-export function ConnectedChartFrame({config,embedded=false,widgetId,render}:{config:WidgetConfig;embedded?:boolean;widgetId?:string;render:(result:ChartResponse,chartType:ChartType)=>ReactNode}){
+export function ConnectedChartFrame({config,embedded=false,widgetId,settings,render}:{config:WidgetConfig;embedded?:boolean;widgetId?:string;settings?:(chartType:ChartType)=>ReactNode;render:(result:ChartResponse,chartType:ChartType)=>ReactNode}){
   const token=useSessionToken()
   const invalid=widgetId!==undefined&&!isSavedWidgetId(widgetId),missing=embedded&&widgetId===undefined
   const {result,chartType,error,loading,reload}=useConnectedData(config.connected,widgetId,!invalid&&!missing)
@@ -105,7 +105,7 @@ export function ConnectedChartFrame({config,embedded=false,widgetId,render}:{con
   if(!API_BASE)return <div className="connected-alert">Notion API 연결 주소가 설정되지 않았습니다.</div>
   if(!token)return <div className="connected-runtime"><LoginBox widgetId={widgetId}/></div>
   return <div className="connected-runtime">
-    <LoginBox compact widgetId={widgetId}/>
+    {embedded?settings?.(chartType??config.chartType):<LoginBox compact widgetId={widgetId}/>}
     <div className="connected-runtime-status"><span><ShieldCheck size={13}/> Notion DB · 본인 전용</span><button type="button" onClick={reload} disabled={loading}><RefreshCcw size={14}/> {loading?'불러오는 중':'새로고침'}</button></div>
     {error&&<p className="connected-error" role="alert">{error}</p>}
     {result?render(result,chartType??config.chartType):<div className="connected-empty">{error|| (loading?'Notion 데이터를 집계하는 중...':'차트 설정을 확인해 주세요.')}</div>}
