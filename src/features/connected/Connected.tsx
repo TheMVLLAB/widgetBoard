@@ -14,11 +14,11 @@ export function LoginBox({compact=false,widgetId}:{compact?:boolean;widgetId?:st
   const [error,setError]=useState(''),[authUrl,setAuthUrl]=useState(''),[notice,setNotice]=useState(''),[pending,setPending]=useState(false)
   const auth=useRef<AbortController|null>(null)
   useEffect(()=>{setError('');setAuthUrl('');setNotice('');setPending(false);return()=>auth.current?.abort()},[token,widgetId])
-  const start=()=>{
+  const start=(reuse:boolean)=>{
     auth.current?.abort()
     const controller=new AbortController();auth.current=controller
     setError('');setAuthUrl('');setNotice('');setPending(true)
-    void beginNotionAuth({widgetId,signal:controller.signal,onReady:url=>{if(!controller.signal.aborted)setAuthUrl(url)},onWindowUnavailable:()=>{if(!controller.signal.aborted)setNotice('인증 창이 차단되었거나 닫혔을 수 있습니다. 인증을 마쳤다면 기다려 주세요. 필요하면 아래의 같은 링크를 새 창에서 여세요.')}})
+    void beginNotionAuth({widgetId,reuse,signal:controller.signal,onReady:url=>{if(!controller.signal.aborted)setAuthUrl(url)},onWindowUnavailable:()=>{if(!controller.signal.aborted)setNotice('인증 창이 차단되었거나 닫혔을 수 있습니다. 인증을 마쳤다면 기다려 주세요. 필요하면 아래의 같은 링크를 새 창에서 여세요.')}})
       .catch(e=>{if(!controller.signal.aborted)setError((e as Error).message)})
       .finally(()=>{if(!controller.signal.aborted)setPending(false)})
   }
@@ -26,7 +26,8 @@ export function LoginBox({compact=false,widgetId}:{compact?:boolean;widgetId?:st
   return <div className={`connected-login ${compact?'connected-login-compact':''}`}>
     {!token&&<><ShieldCheck size={21}/><strong>내 Notion 계정 인증</strong><span>{widgetId?'차트를 저장한 본인의 Notion 계정만 볼 수 있어요. 복사한 링크만으로는 데이터에 접근할 수 없습니다.':'별도 회원가입이나 API 키가 필요 없어요. Notion에서 사용할 DB를 선택해 승인하면 됩니다.'}</span></>}
     {token&&<ConnectedAccount key={token}/>}
-    <button type="button" disabled={pending} onClick={start}>{pending?'Notion 인증 기다리는 중...':widgetId?'내 Notion 계정 인증':'내 Notion 계정 인증 · 워크스페이스 연결'} <ExternalLink size={14}/></button>
+    <button type="button" disabled={pending} onClick={()=>start(!token||!!widgetId)}>{pending?'인증 기다리는 중...':token&&!widgetId?'Notion 워크스페이스 추가':'기존 인증 연결'} <ExternalLink size={14}/></button>
+    {(!token||widgetId)&&<><p className="connected-help">이 브라우저의 인증이 유효하면 새 창에서 연결을 확인한 뒤 Notion 재승인 없이 연결됩니다. 인증이 없거나 만료되었으면 Notion 승인을 진행합니다.</p><button type="button" className="connected-subtle-button" disabled={pending} onClick={()=>start(false)}>Notion 계정 다시 인증 <ExternalLink size={14}/></button></>}
     {authUrl&&<a href={authUrl} target="_blank" rel="noopener noreferrer">같은 인증 요청을 새 창에서 열기 <ExternalLink size={14}/></a>}
     {pending&&<p className="connected-help" role="status">원래 화면을 유지한 채 인증 결과를 확인합니다. 최대 10분 동안 기다려요.</p>}
     {notice&&<p className="connected-help" role="status">{notice}</p>}

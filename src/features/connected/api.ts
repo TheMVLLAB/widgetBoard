@@ -68,9 +68,9 @@ function delay(ms:number,signal:AbortSignal){
     if(signal.aborted)cancel()
   })
 }
-type AuthOptions={widgetId?:string;signal:AbortSignal;onReady:(url:string)=>void;onWindowUnavailable:()=>void}
+type AuthOptions={widgetId?:string;reuse?:boolean;signal:AbortSignal;onReady:(url:string)=>void;onWindowUnavailable:()=>void}
 let authAttempt=0
-export async function beginNotionAuth({widgetId,signal,onReady,onWindowUnavailable}:AuthOptions){
+export async function beginNotionAuth({widgetId,reuse=false,signal,onReady,onWindowUnavailable}:AuthOptions){
   if(!API_BASE)throw new Error('VITE_NOTION_API_BASE를 설정하세요.')
   if(!globalThis.crypto?.subtle||!globalThis.crypto?.getRandomValues)throw new Error('이 환경에서는 안전한 인증을 지원하지 않습니다. 최신 브라우저의 HTTPS 화면에서 열어 주세요.')
   if(widgetId!==undefined&&!isSavedWidgetId(widgetId))throw new Error('저장한 차트 주소가 올바르지 않습니다.')
@@ -86,10 +86,10 @@ export async function beginNotionAuth({widgetId,signal,onReady,onWindowUnavailab
     const verifier=Array.from(crypto.getRandomValues(new Uint8Array(32)),x=>x.toString(16).padStart(2,'0')).join('')
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))
     const verifierHash=Array.from(new Uint8Array(digest),x=>x.toString(16).padStart(2,'0')).join('')
-    const handoff=await requestApi<{id:string;authUrl:string}>('/api/auth/embed','POST',{verifierHash,...(widgetId===undefined?{}:{widgetId})},abort.signal)
+    const handoff=await requestApi<{id:string;authUrl:string}>('/api/auth/embed','POST',{verifierHash,...(widgetId===undefined?{}:{widgetId}),...(reuse?{reuse:true}:{})},abort.signal)
     if(!handoff||typeof handoff.authUrl!=='string')throw new Error('인증 주소 응답 오류')
     const url=new URL(handoff.authUrl)
-    if(!hexToken.test(handoff.id)||url.origin!==new URL(API_BASE).origin||url.username||url.password||url.pathname!=='/api/auth/notion/start'||url.searchParams.get('handoff')!==handoff.id||url.searchParams.size!==1||url.hash)throw new Error('인증 주소 응답 오류')
+    if(!hexToken.test(handoff.id)||url.origin!==new URL(API_BASE).origin||url.username||url.password||url.pathname!=='/api/auth/notion/start'||url.searchParams.get('handoff')!==handoff.id||url.searchParams.size!==(reuse?2:1)||(reuse&&url.searchParams.get('reuse')!=='1')||url.hash)throw new Error('인증 주소 응답 오류')
     ready=true;onReady(handoff.authUrl)
     try{if(popup)popup.location.replace(handoff.authUrl);else onWindowUnavailable()}catch{popup=null;onWindowUnavailable()}
     while(!abort.signal.aborted){

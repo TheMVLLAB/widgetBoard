@@ -13,11 +13,11 @@ function database(){
   const migrations=new URL('../migrations/',import.meta.url)
   for(const file of readdirSync(migrations).filter(file=>file.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL(file,migrations),'utf8'))
   const db={
-    clock:Math.floor(Date.now()/1000),beforeBatch:null,afterStatement:null,
+    clock:Math.floor(Date.now()/1000),beforeBatch:null,afterStatement:null,beforeQuery:null,
     prepare(sql){
       const stmt=sqlite.prepare(sql)
       let args=[]
-      return {bind(...items){args=items;return this},async first(){return stmt.get(...args)??null},async all(){return {results:stmt.all(...args)}},async run(){return stmt.run(...args)},execute(){return {results:stmt.all(...args)}}}
+      return {bind(...items){args=items;return this},async first(){await db.beforeQuery?.(sql,args);return stmt.get(...args)??null},async all(){return {results:stmt.all(...args)}},async run(){return stmt.run(...args)},execute(){return {results:stmt.all(...args)}}}
     },
     async batch(statements){
       if(db.beforeBatch)await db.beforeBatch()
@@ -56,19 +56,19 @@ function notionMock(){
   }
   return mock
 }
-async function handoff(env,widgetId){
+async function handoff(env,widgetId,reuse=false){
   const verifier=randomToken()
-  const response=await worker.fetch(req('/api/auth/embed','POST',{verifierHash:await sha256(verifier),...(widgetId?{widgetId}:{})}),env)
+  const response=await worker.fetch(req('/api/auth/embed','POST',{verifierHash:await sha256(verifier),...(widgetId?{widgetId}:{}),...(reuse?{reuse:true}:{})}),env)
   assert.equal(response.status,200)
   const value=await response.json()
   assert.match(value.id,/^[a-f0-9]{64}$/)
-  assert.equal(value.authUrl,`https://worker.example/api/auth/notion/start?handoff=${value.id}`)
+  assert.equal(value.authUrl,`https://worker.example/api/auth/notion/start?handoff=${value.id}${reuse?'&reuse=1':''}`)
   assert.ok(!value.authUrl.includes(verifier))
   return {...value,verifier}
 }
-async function start(env,flow){
+async function start(env,flow,browserCookie=''){
   // OAuth cookies are first-party in the external browser, never required by the embed.
-  const response=await worker.fetch(new Request(flow.authUrl),env)
+  const response=await worker.fetch(new Request(flow.authUrl,{headers:browserCookie?{Cookie:browserCookie}:{}}),env)
   assert.equal(response.status,302)
   return {state:new URL(response.headers.get('location')).searchParams.get('state'),cookie:response.headers.get('Set-Cookie').split(';')[0]}
 }
@@ -80,7 +80,9 @@ async function complete(env,flow,code='user-A'){
   assert.equal(response.status,302)
   assert.equal(new URL(response.headers.get('Location')).hash,'#/auth/embed/complete')
   assert.ok(response.headers.get('Set-Cookie').includes('Max-Age=0'))
-  return attempt
+  const root=response.headers.getSetCookie().find(value=>value.startsWith('wp_browser='))
+  assert.ok(root)
+  return {...attempt,browserCookie:root.split(';')[0]}
 }
 async function login(env,code='user-A'){
   const flow=await handoff(env)
@@ -89,7 +91,7 @@ async function login(env,code='user-A'){
   assert.equal(response.status,200)
   const {token,expiresIn}=await response.json()
   assert.match(token,/^[a-f0-9]{64}$/)
-  assert.equal(expiresIn,7200)
+  assert.ok(expiresIn>0&&expiresIn<=7200)
   return {...flow,...attempt,session:token}
 }
 async function save(env,session){
@@ -99,6 +101,26 @@ async function save(env,session){
   return (await response.json()).id
 }
 const sessionCount=async DB=>(await DB.prepare('SELECT count(*) AS count FROM sessions').first()).count
+const rootHash=async session=>sha256(session.browserCookie.split('=')[1])
+const rootCount=async DB=>(await DB.prepare('SELECT count(*) AS count FROM browser_sessions').first()).count
+async function consent(env,flow,browserCookie){
+  const response=await worker.fetch(new Request(flow.authUrl,{headers:{Cookie:browserCookie}}),env)
+  assert.equal(response.status,200)
+  const html=await response.text()
+  const csrf=html.match(/name="csrf" value="([a-f0-9]{64})"/)?.[1]
+  assert.ok(csrf)
+  return {response,html,csrf}
+}
+function reuse(env,flow,browserCookie,csrf,origin='https://worker.example'){
+  return worker.fetch(new Request('https://worker.example/api/auth/notion/reuse',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Cookie:browserCookie,...(origin===null?{}:{Origin:origin})},body:new URLSearchParams({handoff:flow.id,csrf})}),env)
+}
+async function approveReuse(env,flow,browserCookie){
+  const page=await consent(env,flow,browserCookie)
+  const response=await reuse(env,flow,browserCookie,page.csrf)
+  assert.equal(response.status,302)
+  assert.equal(new URL(response.headers.get('Location')).hash,'#/auth/embed/complete')
+  return page
+}
 
 test('owner-only saved widgets query live Notion; copied URLs and removed publication APIs never expose data',async()=>{
   const DB=database(),env=mockEnv(DB),mock=notionMock()
@@ -251,6 +273,8 @@ test('first successful OAuth callback fixes handoff identity, including overlapp
     assert.equal((await callback(env,second,'user-B')).status,302)
     release()
     assert.equal((await slow).status,401,'late callback cannot overwrite authenticated identity')
+    assert.equal(await rootCount(DB),1,'losing callback cannot leave an additional browser root')
+    assert.equal(await DB.prepare('SELECT id FROM connections WHERE user_id=?').bind('user-A').first(),null)
     const response=await claim(env,flow)
     assert.equal(response.status,200)
     const me=await worker.fetch(req('/api/me','GET',undefined,(await response.json()).token),env)
@@ -264,4 +288,305 @@ test('AES-GCM encrypt/decrypt rejects modifications; random tokens differ',async
   assert.equal(await decrypt(cipher,key),'private-token')
   await assert.rejects(()=>decrypt(cipher.slice(0,-1)+(cipher.endsWith('0')?'1':'0'),key))
   assert.notEqual(randomToken(),randomToken())
+})
+
+test('OAuth creates a hashed two-hour browser root and appends its private cookie alongside state deletion',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const flow=await handoff(env),attempt=await start(env,flow)
+    const response=await callback(env,attempt)
+    assert.equal(response.status,302)
+    const cookies=response.headers.getSetCookie()
+    assert.equal(cookies.length,2)
+    assert.ok(cookies.some(value=>value.startsWith('wp_oauth=;')&&value.includes('Max-Age=0')))
+    const root=cookies.find(value=>value.startsWith('wp_browser='))
+    const raw=root.match(/^wp_browser=([a-f0-9]{64});/)[1]
+    for(const flag of ['HttpOnly','SameSite=Lax','Path=/api/auth','Max-Age=7200','Secure'])assert.ok(root.includes(flag))
+    assert.ok(!response.headers.get('Location').includes(raw))
+    assert.equal(await response.text(),'')
+    const stored=await DB.prepare('SELECT * FROM browser_sessions').first()
+    assert.equal(stored.token_hash,await sha256(raw))
+    assert.notEqual(stored.token_hash,raw)
+    assert.equal(stored.user_id,'user-A')
+    assert.equal(stored.expires_at,DB.clock+7200)
+    const completed=await DB.prepare('SELECT * FROM oauth_embed_handoffs WHERE id_hash=?').bind(await sha256(flow.id)).first()
+    assert.equal(completed.browser_session_hash,stored.token_hash)
+    const claimed=await claim(env,flow),value=await claimed.json()
+    assert.equal(claimed.status,200)
+    assert.deepEqual(Object.keys(value).sort(),['expiresIn','token'])
+    assert.ok(!JSON.stringify(value).includes(raw))
+    const child=await DB.prepare('SELECT * FROM sessions WHERE token_hash=?').bind(await sha256(value.token)).first()
+    assert.equal(child.browser_session_hash,stored.token_hash)
+    assert.equal(child.expires_at,stored.expires_at)
+    const localEnv={...env,NOTION_REDIRECT_URI:'http://localhost:8787/api/auth/notion/callback'}
+    const localFlow=await handoff(localEnv),localAttempt=await start(localEnv,localFlow)
+    const local=await callback(localEnv,localAttempt)
+    assert.equal(local.status,302)
+    assert.ok(local.headers.getSetCookie().every(value=>!value.includes('; Secure')))
+  }finally{mock.restore();DB.close()}
+})
+
+test('existing root requires explicit consent, then reconnects without Notion exchange or search',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),widgetId=await save(env,owner.session)
+    const flow=await handoff(env,widgetId,true),before=mock.calls.length,roots=await rootCount(DB)
+    const page=await consent(env,flow,owner.browserCookie)
+    const repeated=await worker.fetch(new Request(flow.authUrl,{headers:{Cookie:owner.browserCookie,Origin:origin}}),env)
+    assert.equal(repeated.status,200)
+    assert.equal(repeated.headers.get('Access-Control-Allow-Origin'),null,'consent nonce is not CORS-readable')
+    assert.equal(page.response.headers.get('Cache-Control'),'no-store')
+    assert.equal(page.response.headers.get('X-Frame-Options'),'DENY')
+    assert.ok(page.response.headers.get('Content-Security-Policy').includes("frame-ancestors 'none'"))
+    assert.equal(page.response.headers.get('Set-Cookie'),null,'consent GET never rotates or creates cookies')
+    for(const secret of [owner.browserCookie.split('=')[1],flow.verifier,'SECRET_ROW','TOKEN_A','REFRESH_TOKEN','My chart'])assert.ok(!page.html.includes(secret))
+    const pending=await claim(env,flow)
+    assert.equal(pending.status,202)
+    assert.deepEqual(await pending.json(),{pending:true},'GET alone cannot authenticate a verifier holder')
+    const record=await DB.prepare('SELECT * FROM oauth_embed_handoffs WHERE id_hash=?').bind(await sha256(flow.id)).first()
+    assert.equal(record.user_id,null);assert.equal(record.browser_session_hash,null)
+    assert.equal((await worker.fetch(req('/api/widgets/'+widgetId,'GET',undefined,undefined,{Cookie:owner.browserCookie}),env)).status,401,'root cookie is never an iframe bearer')
+    const approved=await reuse(env,flow,owner.browserCookie,page.csrf)
+    assert.equal(approved.status,302)
+    assert.equal(new URL(approved.headers.get('Location')).hash,'#/auth/embed/complete')
+    assert.equal(approved.headers.get('Set-Cookie'),null)
+    assert.equal((await reuse(env,flow,owner.browserCookie,page.csrf)).status,401,'consent cannot replay')
+    assert.equal((await claim(env,flow,randomToken())).status,401)
+    const claimed=await claim(env,flow)
+    assert.equal(claimed.status,200)
+    const value=await claimed.json()
+    assert.ok(value.expiresIn>0&&value.expiresIn<=7200)
+    const child=await DB.prepare('SELECT * FROM sessions WHERE token_hash=?').bind(await sha256(value.token)).first()
+    assert.equal(child.browser_session_hash,await rootHash(owner))
+    assert.equal(await rootCount(DB),roots,'reuse must not lengthen or replace the browser root')
+    assert.equal(mock.calls.length,before,'GET, consent and claim never call any Notion endpoint')
+    assert.equal((await claim(env,flow)).status,401)
+    assert.equal((await worker.fetch(req('/api/widgets/'+widgetId,'GET',undefined,value.token),env)).status,200)
+  }finally{mock.restore();DB.close()}
+})
+
+test('reuse POST rejects missing or foreign Origin, invalid CSRF, cross-handoff tokens and missing cookie',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),flow=await handoff(env,undefined,true),other=await handoff(env,undefined,true)
+    const page=await consent(env,flow,owner.browserCookie),before=await sessionCount(DB),calls=mock.calls.length
+    for(const origin of ['https://evil.example','https://example.github.io',null]){
+      assert.equal((await reuse(env,flow,owner.browserCookie,page.csrf,origin)).status,403)
+    }
+    assert.equal((await reuse(env,flow,owner.browserCookie,randomToken())).status,403)
+    assert.equal((await reuse(env,other,owner.browserCookie,page.csrf)).status,403,'nonce is bound to this handoff')
+    assert.equal((await reuse(env,flow,'',page.csrf)).status,401)
+    const record=await DB.prepare('SELECT * FROM oauth_embed_handoffs WHERE id_hash=?').bind(await sha256(flow.id)).first()
+    assert.equal(record.user_id,null);assert.equal(record.denied,0,'CSRF errors cannot poison a legitimate flow')
+    assert.equal((await claim(env,flow)).status,202)
+    assert.equal(await sessionCount(DB),before)
+    assert.equal(mock.calls.length,calls)
+    assert.equal((await reuse(env,flow,owner.browserCookie,page.csrf)).status,302)
+    assert.equal((await worker.fetch(req('/api/auth/embed','POST',{verifierHash:'a'.repeat(64),reuse:'true'}),env)).status,400)
+  }finally{mock.restore();DB.close()}
+})
+
+test('nonowner reuse denial reaches verifier-bound polling without GET completing authentication',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),widgetId=await save(env,owner.session),other=await login(env,'user-B')
+    const flow=await handoff(env,widgetId,true),before=await sessionCount(DB),calls=mock.calls.length
+    const response=await worker.fetch(new Request(flow.authUrl,{headers:{Cookie:other.browserCookie}}),env)
+    assert.equal(response.status,403)
+    assert.equal(response.headers.get('Set-Cookie'),null)
+    assert.equal((await claim(env,flow)).status,403,'iframe must learn the owner denial instead of polling pending')
+    assert.equal((await claim(env,flow,randomToken())).status,401,'denial is still verifier-bound')
+    const record=await DB.prepare('SELECT * FROM oauth_embed_handoffs WHERE id_hash=?').bind(await sha256(flow.id)).first()
+    assert.equal(record.denied,1);assert.equal(record.user_id,null);assert.equal(record.browser_session_hash,null)
+    assert.equal((await worker.fetch(new Request(flow.authUrl,{headers:{Cookie:owner.browserCookie}}),env)).status,401)
+    const direct=await handoff(env,widgetId,true)
+    const csrf=await sha256(other.browserCookie.split('=')[1]+':'+direct.id)
+    assert.equal((await reuse(env,direct,other.browserCookie,csrf)).status,403,'POST repeats the owner check even without GET')
+    assert.equal(await sessionCount(DB),before)
+    assert.equal(mock.calls.length,calls)
+  }finally{mock.restore();DB.close()}
+})
+
+test('missing, malformed, expired and revoked browser roots fall back to OAuth; explicit OAuth never skips approval',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),root=await rootHash(owner),calls=mock.calls.length
+    const missing=await handoff(env,undefined,true)
+    await start(env,missing)
+    const malformed=await handoff(env,undefined,true)
+    await start(env,malformed,'wp_browser=invalid')
+    const explicit=await handoff(env)
+    await start(env,explicit,owner.browserCookie)
+    const expires=await handoff(env,undefined,true)
+    const page=await consent(env,expires,owner.browserCookie)
+    await DB.prepare('UPDATE browser_sessions SET expires_at=? WHERE token_hash=?').bind(DB.clock,root).run()
+    assert.equal((await reuse(env,expires,owner.browserCookie,page.csrf)).status,401)
+    await start(env,expires,owner.browserCookie)
+    assert.equal((await worker.fetch(req('/api/me','GET',undefined,owner.session),env)).status,401,'an unexpired bearer cannot outlive its root')
+    await DB.prepare('DELETE FROM browser_sessions WHERE token_hash=?').bind(root).run()
+    const revoked=await handoff(env,undefined,true)
+    await start(env,revoked,owner.browserCookie)
+    assert.equal(mock.calls.length,calls,'fallback GET only redirects; it does not exchange or search')
+    assert.equal((await callback(env,await start(env,missing))).status,302,'fallback still completes genuine OAuth')
+  }finally{mock.restore();DB.close()}
+})
+
+test('child lifetime is capped by its parent and root-null legacy sessions keep their two-hour contract',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),root=await rootHash(owner),expiry=DB.clock+90
+    await DB.prepare('UPDATE browser_sessions SET expires_at=? WHERE token_hash=?').bind(expiry,root).run()
+    const flow=await handoff(env,undefined,true)
+    await approveReuse(env,flow,owner.browserCookie)
+    const claimed=await claim(env,flow),value=await claimed.json()
+    assert.equal(claimed.status,200);assert.equal(value.expiresIn,90)
+    const child=await DB.prepare('SELECT * FROM sessions WHERE token_hash=?').bind(await sha256(value.token)).first()
+    assert.equal(child.expires_at,expiry)
+    assert.equal((await DB.prepare('SELECT expires_at FROM browser_sessions WHERE token_hash=?').bind(root).first()).expires_at,expiry)
+    const legacy=randomToken()
+    await DB.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)').bind(await sha256(legacy),'user-A',DB.clock+7200).run()
+    const legacyFlow=await handoff(env)
+    await DB.prepare('UPDATE oauth_embed_handoffs SET user_id=? WHERE id_hash=?').bind('user-A',await sha256(legacyFlow.id)).run()
+    const legacyClaim=await claim(env,legacyFlow),legacyValue=await legacyClaim.json()
+    assert.equal(legacyClaim.status,200);assert.equal(legacyValue.expiresIn,7200)
+    assert.equal((await DB.prepare('SELECT browser_session_hash FROM sessions WHERE token_hash=?').bind(await sha256(legacyValue.token)).first()).browser_session_hash,null)
+    DB.clock=expiry
+    assert.equal((await worker.fetch(req('/api/me','GET',undefined,value.token),env)).status,401)
+    assert.equal((await worker.fetch(req('/api/me','GET',undefined,owner.session),env)).status,401)
+    assert.equal((await worker.fetch(req('/api/me','GET',undefined,legacy),env)).status,200)
+    assert.equal((await worker.fetch(req('/api/me','GET',undefined,legacyValue.token),env)).status,200)
+  }finally{mock.restore();DB.close()}
+})
+
+test('bearer-only logout revokes the browser root, original session, all children and pending claims',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),independent=await login(env),root=await rootHash(owner),children=[]
+    for(let i=0;i<2;i++){
+      const flow=await handoff(env,undefined,true)
+      await approveReuse(env,flow,owner.browserCookie)
+      children.push((await (await claim(env,flow)).json()).token)
+    }
+    const pendingClaim=await handoff(env,undefined,true)
+    await approveReuse(env,pendingClaim,owner.browserCookie)
+    DB.afterStatement=index=>{if(index===1)throw Error('transaction failure')}
+    assert.equal((await worker.fetch(req('/api/auth/logout','POST',{},children[0]),env)).status,500)
+    DB.afterStatement=null
+    assert.equal(await sessionCount(DB),4,'failed logout must roll back sibling deletion and root revocation')
+    assert.ok(await DB.prepare('SELECT token_hash FROM browser_sessions WHERE token_hash=?').bind(root).first())
+    assert.equal((await worker.fetch(req('/api/me','GET',undefined,owner.session),env)).status,200)
+    const logout=await worker.fetch(req('/api/auth/logout','POST',{},children[0]),env)
+    assert.equal(logout.status,200)
+    assert.ok(logout.headers.get('Set-Cookie').includes('wp_browser=;'))
+    assert.ok(logout.headers.get('Set-Cookie').includes('Max-Age=0'))
+    assert.equal(await DB.prepare('SELECT token_hash FROM browser_sessions WHERE token_hash=?').bind(root).first(),null)
+    for(const token of [owner.session,...children]){
+      assert.equal((await worker.fetch(req('/api/me','GET',undefined,token),env)).status,401)
+      assert.equal(await DB.prepare('SELECT token_hash FROM sessions WHERE token_hash=?').bind(await sha256(token)).first(),null)
+    }
+    assert.equal((await claim(env,pendingClaim)).status,401)
+    assert.equal((await worker.fetch(req('/api/me','GET',undefined,independent.session),env)).status,200,'other browser roots of the same user remain separate')
+    assert.equal(await sessionCount(DB),1)
+    await start(env,await handoff(env,undefined,true),owner.browserCookie)
+  }finally{mock.restore();DB.close()}
+})
+
+test('claim rejects revoked, expired or wrong-user roots before or during issuance and leaves no orphan token',async t=>{
+  for(const scenario of ['revoked-before','revoked-between','revoked-after-consume','expired-between','wrong-user','owner-between','handoff-replaced']){
+    await t.test(scenario,async()=>{
+      const DB=database(),env=mockEnv(DB),mock=notionMock()
+      try{
+        const owner=await login(env),widgetId=await save(env,owner.session)
+        const flow=await handoff(env,widgetId,true),root=await rootHash(owner)
+        await approveReuse(env,flow,owner.browserCookie)
+        const before=await sessionCount(DB),idHash=await sha256(flow.id)
+        if(scenario==='revoked-before')DB.beforeBatch=()=>DB.prepare('DELETE FROM browser_sessions WHERE token_hash=?').bind(root).run()
+        if(scenario==='revoked-between')DB.afterStatement=index=>{if(index===0)DB.prepare('DELETE FROM browser_sessions WHERE token_hash=?').bind(root).run()}
+        if(scenario==='revoked-after-consume')DB.afterStatement=index=>{if(index===1)DB.prepare('DELETE FROM browser_sessions WHERE token_hash=?').bind(root).run()}
+        if(scenario==='expired-between')DB.afterStatement=index=>{if(index===0)DB.clock+=7200}
+        if(scenario==='wrong-user'){
+          await DB.prepare('INSERT INTO users(id,created_at) VALUES(?,?)').bind('user-B',DB.clock).run()
+          await DB.prepare('UPDATE browser_sessions SET user_id=? WHERE token_hash=?').bind('user-B',root).run()
+        }
+        if(scenario==='owner-between')DB.afterStatement=index=>{if(index===0)DB.prepare('DELETE FROM widgets WHERE id=?').bind(widgetId).run()}
+        if(scenario==='handoff-replaced')DB.beforeBatch=()=>DB.prepare('UPDATE oauth_embed_handoffs SET browser_session_hash=NULL WHERE id_hash=?').bind(idHash).run()
+        assert.equal((await claim(env,flow)).status,401)
+        assert.equal(await sessionCount(DB),before,'failed issuance must remove its newly inserted token')
+        DB.beforeBatch=null;DB.afterStatement=null
+        if(scenario!=='owner-between'&&scenario!=='handoff-replaced')assert.equal((await worker.fetch(req('/api/me','GET',undefined,owner.session),env)).status,401)
+      }finally{mock.restore();DB.close()}
+    })
+  }
+})
+
+test('reuse consent SQL rechecks root, handoff expiry, ownership and first-winner identity',async t=>{
+  for(const scenario of ['root-revoked','root-expired','handoff-expired','owner-deleted','already-completed']){
+    await t.test(scenario,async()=>{
+      const DB=database(),env=mockEnv(DB),mock=notionMock()
+      try{
+        const owner=await login(env),widgetId=await save(env,owner.session),flow=await handoff(env,widgetId,true)
+        const page=await consent(env,flow,owner.browserCookie),root=await rootHash(owner),hash=await sha256(flow.id),before=await sessionCount(DB)
+        DB.beforeQuery=async sql=>{
+          if(!sql.startsWith('UPDATE oauth_embed_handoffs SET user_id='))return
+          DB.beforeQuery=null
+          if(scenario==='root-revoked')await DB.prepare('DELETE FROM browser_sessions WHERE token_hash=?').bind(root).run()
+          if(scenario==='root-expired')await DB.prepare('UPDATE browser_sessions SET expires_at=? WHERE token_hash=?').bind(DB.clock,root).run()
+          if(scenario==='handoff-expired')await DB.prepare('UPDATE oauth_embed_handoffs SET expires_at=? WHERE id_hash=?').bind(DB.clock,hash).run()
+          if(scenario==='owner-deleted')await DB.prepare('DELETE FROM widgets WHERE id=?').bind(widgetId).run()
+          if(scenario==='already-completed')await DB.prepare('UPDATE oauth_embed_handoffs SET user_id=? WHERE id_hash=?').bind('user-A',hash).run()
+        }
+        assert.equal((await reuse(env,flow,owner.browserCookie,page.csrf)).status,401)
+        const record=await DB.prepare('SELECT * FROM oauth_embed_handoffs WHERE id_hash=?').bind(hash).first()
+        assert.equal(record.user_id,scenario==='already-completed'?'user-A':null)
+        assert.equal(record.browser_session_hash,null)
+        assert.equal(await sessionCount(DB),before)
+      }finally{mock.restore();DB.close()}
+    })
+  }
+})
+
+test('OAuth completion transaction checks expiry, removes unlinked roots and rolls back partial completion',async t=>{
+  for(const scenario of ['expired-before','expired-between','batch-failure']){
+    await t.test(scenario,async()=>{
+      const DB=database(),env=mockEnv(DB),mock=notionMock()
+      try{
+        const flow=await handoff(env),attempt=await start(env,flow),hash=await sha256(flow.id)
+        if(scenario==='expired-before')DB.beforeBatch=()=>{DB.clock+=601}
+        if(scenario==='expired-between')DB.afterStatement=index=>{if(index===1)DB.clock+=601}
+        if(scenario==='batch-failure')DB.afterStatement=index=>{if(index===2)throw Error('transaction failure')}
+        const response=await callback(env,attempt)
+        assert.equal(response.status,scenario==='batch-failure'?500:401)
+        assert.equal(response.headers.get('Set-Cookie'),null)
+        assert.equal(await rootCount(DB),0)
+        assert.equal(await sessionCount(DB),0)
+        assert.equal((await DB.prepare('SELECT count(*) AS count FROM connections').first()).count,0)
+        const record=await DB.prepare('SELECT * FROM oauth_embed_handoffs WHERE id_hash=?').bind(hash).first()
+        assert.equal(record.user_id,null);assert.equal(record.browser_session_hash,null)
+        DB.beforeBatch=null;DB.afterStatement=null
+        if(scenario==='batch-failure')await complete(env,flow)
+      }finally{mock.restore();DB.close()}
+    })
+  }
+})
+
+test('overlapping OAuth and reuse consent cannot overwrite the first authenticated handoff or leak an extra root',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),flow=await handoff(env,undefined,true)
+    const oauth=await start(env,flow),page=await consent(env,flow,owner.browserCookie)
+    let release,entered
+    const gate=new Promise(resolve=>{release=resolve}),started=new Promise(resolve=>{entered=resolve})
+    mock.beforeToken=async()=>{entered();await gate}
+    const slow=callback(env,oauth,'user-B')
+    await started
+    assert.equal((await reuse(env,flow,owner.browserCookie,page.csrf)).status,302)
+    release()
+    assert.equal((await slow).status,401)
+    assert.equal(await rootCount(DB),1)
+    assert.equal(await DB.prepare('SELECT id FROM connections WHERE user_id=?').bind('user-B').first(),null)
+    const response=await claim(env,flow)
+    assert.equal(response.status,200)
+    const me=await worker.fetch(req('/api/me','GET',undefined,(await response.json()).token),env)
+    assert.equal((await me.json()).userId,'user-A')
+  }finally{mock.restore();DB.close()}
 })
