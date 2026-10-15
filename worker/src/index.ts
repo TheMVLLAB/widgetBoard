@@ -21,7 +21,7 @@ class ApiError extends Error{status:number;constructor(message:string,status=400
 const send=(value:unknown,status=200,headers?:HeadersInit)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8',...noStore,...headers}})
 function front(env:Env){const url=new URL(env.FRONTEND_URL);if((url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='localhost'))||url.username||url.password||url.search||url.hash||url.pathname.includes('..'))throw new Error('Invalid FRONTEND_URL');return url}
 function checkEnv(env:Env){if(!env.DB||!env.NOTION_CLIENT_ID||!env.NOTION_CLIENT_SECRET||!env.NOTION_REDIRECT_URI||!env.TOKEN_ENCRYPTION_KEY||!env.FRONTEND_URL)return false;return /^[a-f0-9]{64}$/i.test(env.TOKEN_ENCRYPTION_KEY)}
-function allowCors(resp:Response,req:Request,env:Env){if(resp.headers.get('Content-Type')?.startsWith('text/html'))return resp;const origin=req.headers.get('Origin');try{if(origin&&origin===front(env).origin){resp.headers.set('Access-Control-Allow-Origin',origin);resp.headers.set('Vary','Origin')}}catch{/* environment not configured yet */}return resp}
+function allowCors(resp:Response,req:Request,env:Env){if(resp.headers.get('Content-Type')?.startsWith('text/html'))return resp;const origin=req.headers.get('Origin');try{if(origin&&origin===front(env).origin){resp.headers.set('Access-Control-Allow-Origin',origin);resp.headers.set('Vary','Origin');if(new URL(req.url).pathname==='/api/auth/session')resp.headers.set('Access-Control-Allow-Credentials','true')}}catch{/* environment not configured yet */}return resp}
 function guardOrigin(req:Request,env:Env){const origin=req.headers.get('Origin');if(origin&&origin!==front(env).origin)throw new ApiError('허용되지 않은 출처입니다.',403)}
 async function bodyJson(req:Request){if(Number(req.headers.get('Content-Length')||0)>8192)throw new ApiError('요청 크기 초과',413);const str=await req.text();if(str.length>8192)throw new ApiError('요청 크기 초과',413);try{const value=JSON.parse(str);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value as Record<string,unknown>}catch{throw new ApiError('JSON 형식 오류')}}
 function pathPart(str:string){return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(str)}
@@ -30,7 +30,7 @@ function sourceId(key:string){if(!/^n[a-f0-9]{32}$/.test(key))throw new ApiError
 function redirectAuth(env:Env){const url=front(env);url.hash='/auth/embed/complete';return new Response(null,{status:302,headers:{Location:url.href,...noStore}})}
 function cookie(req:Request,name:string){const match=req.headers.get('Cookie')?.match(new RegExp('(?:^|;\\s*)'+name+'=([^;]*)'));return match?.[1]||''}
 function oauthCookie(value:string,env:Env){return `wp_oauth=${value}; HttpOnly; SameSite=Lax; Path=/api/auth/notion; Max-Age=${value?600:0}${new URL(env.NOTION_REDIRECT_URI).protocol==='https:'?'; Secure':''}`}
-function browserCookie(value:string,maxAge:number,env:Env){return `wp_browser=${value}; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=${Math.max(0,Math.min(7200,maxAge))}${new URL(env.NOTION_REDIRECT_URI).protocol==='https:'?'; Secure':''}`}
+function browserCookie(value:string,maxAge:number,env:Env){const secure=new URL(env.NOTION_REDIRECT_URI).protocol==='https:';return `wp_browser=${value}; HttpOnly; SameSite=${secure?'None':'Lax'}; Path=/api/auth; Max-Age=${Math.max(0,Math.min(7200,maxAge))}${secure?'; Secure':''}`}
 async function browserSession(req:Request,env:Env){
   const raw=cookie(req,'wp_browser')
   if(!/^[a-f0-9]{64}$/.test(raw))return null
@@ -174,7 +174,9 @@ async function main(req:Request,env:Env){
     if(record.widget_id&&!await env.DB.prepare('SELECT id FROM widgets WHERE id=? AND user_id=?').bind(record.widget_id,browser.user_id).first())throw new ApiError('이 위젯의 소유자로 로그인해 주세요.',403)
     const completed=await env.DB.prepare('UPDATE oauth_embed_handoffs SET user_id=?,browser_session_hash=? WHERE id_hash=? AND expires_at>unixepoch() AND user_id IS NULL AND denied=0 AND (widget_id IS NULL OR EXISTS (SELECT 1 FROM widgets WHERE widgets.id=oauth_embed_handoffs.widget_id AND widgets.user_id=?)) AND EXISTS (SELECT 1 FROM browser_sessions WHERE token_hash=? AND user_id=? AND expires_at>unixepoch()) RETURNING id_hash').bind(browser.user_id,browser.hash,idHash,browser.user_id,browser.hash,browser.user_id).first()
     if(!completed)throw new ApiError('로그인 요청이 만료되었거나 사용되었습니다.',401)
-    return redirectAuth(env)
+    const response=redirectAuth(env)
+    response.headers.append('Set-Cookie',browserCookie(browser.raw,browser.expires_at-epoch(),env))
+    return response
   }
   if(path==='/api/auth/notion/callback'&&req.method==='GET'){
     const state=url.searchParams.get('state')||''
@@ -248,6 +250,21 @@ async function main(req:Request,env:Env){
     if(!results[1].results.length||!issued)throw new ApiError('로그인 요청이 만료되었거나 사용되었습니다.',401)
     return send({token,expiresIn:Math.min(7200,issued.remaining)})
   }
+  if(path==='/api/auth/session'&&req.method==='POST'){
+    if(req.headers.get('Origin')!==front(env).origin)throw new ApiError('허용되지 않은 출처입니다.',403)
+    if(req.headers.get('Content-Type')?.split(';')[0].trim()!=='application/json')throw new ApiError('JSON 요청이 필요합니다.')
+    const {widgetId}=await bodyJson(req)
+    if(widgetId!==undefined&&(typeof widgetId!=='string'||!pathPart(widgetId)))throw new ApiError('저장한 차트 주소가 올바르지 않습니다.')
+    const browser=await browserSession(req,env)
+    if(!browser)throw new ApiError('기존 인증이 없거나 만료되었습니다.',401)
+    if(widgetId!==undefined&&!await env.DB.prepare('SELECT id FROM widgets WHERE id=? AND user_id=?').bind(widgetId,browser.user_id).first())throw new ApiError('이 위젯의 소유자로 로그인해 주세요.',403)
+    await rateLimit(req,env,'session-restore',60)
+    const token=randomToken(),hash=await sha256(token)
+    // Recheck the root and ownership in the insert, not just before the asynchronous lookup.
+    const issued=await env.DB.prepare('INSERT INTO sessions(token_hash,user_id,expires_at,browser_session_hash) SELECT ?,user_id,expires_at,token_hash FROM browser_sessions WHERE token_hash=? AND user_id=? AND expires_at>unixepoch() AND (? IS NULL OR EXISTS (SELECT 1 FROM widgets WHERE id=? AND user_id=browser_sessions.user_id)) RETURNING expires_at-unixepoch() AS remaining').bind(hash,browser.hash,browser.user_id,widgetId??null,widgetId??null).first<{remaining:number}>()
+    if(!issued)throw new ApiError('기존 인증이 만료되었거나 권한이 변경되었습니다.',401)
+    return send({token,expiresIn:Math.min(7200,issued.remaining)})
+  }
   const userId=await sessionUser(req,env)
   if(path==='/api/auth/logout'&&req.method==='POST'){
     const token=req.headers.get('Authorization')?.replace(/^Bearer /,'')||''
@@ -300,7 +317,7 @@ async function main(req:Request,env:Env){
 }
 export default {async fetch(req:Request,env:Env):Promise<Response>{
   if(req.method==='OPTIONS'){
-    try{guardOrigin(req,env);return allowCors(new Response(null,{status:204,headers:{...noStore,'Access-Control-Allow-Methods':'GET,POST,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization','Access-Control-Max-Age':'600'}}),req,env)}catch{return send({error:'허용되지 않은 출처입니다.'},403)}
+    try{guardOrigin(req,env);if(new URL(req.url).pathname==='/api/auth/session'&&req.headers.get('Origin')!==front(env).origin)throw new ApiError('허용되지 않은 출처입니다.',403);return allowCors(new Response(null,{status:204,headers:{...noStore,'Access-Control-Allow-Methods':'GET,POST,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization','Access-Control-Max-Age':'600'}}),req,env)}catch{return send({error:'허용되지 않은 출처입니다.'},403)}
   }
   try{return allowCors(await main(req,env),req,env)}
   catch(err){const known=err instanceof ApiError;if(!known)console.error('Unexpected Worker error (message/redacted)');return allowCors(send({error:known?err.message:'서버 오류가 발생했습니다.'},known?err.status:500),req,env)}

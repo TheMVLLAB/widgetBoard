@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Check, ExternalLink, LockKeyhole, LogOut, RefreshCcw, ShieldCheck } from 'lucide-react'
-import { API_BASE, beginNotionAuth, disconnect, fetchChart, fetchSavedChart, fetchSchema, fetchSources, isSavedWidgetId, logout, privateEmbedUrl, saveChart, useSessionToken, workspaces, savedCharts } from './api'
+import { API_BASE, beginNotionAuth, disconnect, fetchChart, fetchSavedChart, fetchSchema, fetchSources, isSavedWidgetId, logout, privateEmbedUrl, restoreSession, saveChart, useSessionToken, workspaces, savedCharts } from './api'
 import type { ChartResponse, ConnectedSource, NotionField, Workspace, SavedChart } from './api'
 import type { ChartType, ConnectedChartConfig, WidgetConfig } from '../../lib/config'
 import { defaultConfig } from '../../lib/config'
@@ -12,8 +12,15 @@ export function OAuthEmbedComplete(){
 export function LoginBox({compact=false,widgetId}:{compact?:boolean;widgetId?:string}){
   const token=useSessionToken()
   const [error,setError]=useState(''),[authUrl,setAuthUrl]=useState(''),[notice,setNotice]=useState(''),[pending,setPending]=useState(false)
+  const [restoring,setRestoring]=useState(!token)
   const auth=useRef<AbortController|null>(null)
-  useEffect(()=>{setError('');setAuthUrl('');setNotice('');setPending(false);return()=>auth.current?.abort()},[token,widgetId])
+  useEffect(()=>{
+    let mounted=true
+    setError('');setAuthUrl('');setNotice('');setPending(false)
+    setRestoring(!token&&!!API_BASE)
+    if(!token&&API_BASE)void restoreSession(widgetId).finally(()=>{if(mounted)setRestoring(false)})
+    return()=>{mounted=false;auth.current?.abort()}
+  },[token,widgetId])
   const start=(reuse:boolean)=>{
     auth.current?.abort()
     const controller=new AbortController();auth.current=controller
@@ -23,6 +30,7 @@ export function LoginBox({compact=false,widgetId}:{compact?:boolean;widgetId?:st
       .finally(()=>{if(!controller.signal.aborted)setPending(false)})
   }
   if(!API_BASE)return <div className="connected-alert"><LockKeyhole size={18}/> 연동 API 주소를 아직 설정하지 않았습니다.</div>
+  if(!token&&restoring)return <div className={`connected-login ${compact?'connected-login-compact':''}`} role="status">기존 인증 확인 중…</div>
   return <div className={`connected-login ${compact?'connected-login-compact':''}`}>
     {!token&&<><div className="connected-login-heading"><ShieldCheck size={18}/><strong>내 Notion 계정 인증</strong></div><span>{widgetId?'차트를 저장한 본인의 계정만 볼 수 있어요. 복사한 링크만으로는 접근할 수 없습니다.':'별도 가입·API 키 없이, Notion에서 사용할 DB를 선택해 승인하세요.'}</span></>}
     {token&&<ConnectedAccount key={token}/>}

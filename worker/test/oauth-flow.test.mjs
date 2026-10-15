@@ -301,7 +301,7 @@ test('OAuth creates a hashed two-hour browser root and appends its private cooki
     assert.ok(cookies.some(value=>value.startsWith('wp_oauth=;')&&value.includes('Max-Age=0')))
     const root=cookies.find(value=>value.startsWith('wp_browser='))
     const raw=root.match(/^wp_browser=([a-f0-9]{64});/)[1]
-    for(const flag of ['HttpOnly','SameSite=Lax','Path=/api/auth','Max-Age=7200','Secure'])assert.ok(root.includes(flag))
+    for(const flag of ['HttpOnly','SameSite=None','Path=/api/auth','Max-Age=7200','Secure'])assert.ok(root.includes(flag))
     assert.ok(!response.headers.get('Location').includes(raw))
     assert.equal(await response.text(),'')
     const stored=await DB.prepare('SELECT * FROM browser_sessions').first()
@@ -349,7 +349,6 @@ test('existing root requires explicit consent, then reconnects without Notion ex
     const approved=await reuse(env,flow,owner.browserCookie,page.csrf)
     assert.equal(approved.status,302)
     assert.equal(new URL(approved.headers.get('Location')).hash,'#/auth/embed/complete')
-    assert.equal(approved.headers.get('Set-Cookie'),null)
     assert.equal((await reuse(env,flow,owner.browserCookie,page.csrf)).status,401,'consent cannot replay')
     assert.equal((await claim(env,flow,randomToken())).status,401)
     const claimed=await claim(env,flow)
@@ -588,5 +587,99 @@ test('overlapping OAuth and reuse consent cannot overwrite the first authenticat
     assert.equal(response.status,200)
     const me=await worker.fetch(req('/api/me','GET',undefined,(await response.json()).token),env)
     assert.equal((await me.json()).userId,'user-A')
+  }finally{mock.restore();DB.close()}
+})
+
+test('cookie restoration grants only the owner a bounded session without another Notion OAuth exchange',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),widgetId=await save(env,owner.session),other=await login(env,'user-B')
+    const root=await DB.prepare('SELECT * FROM browser_sessions WHERE token_hash=?').bind(await rootHash(owner)).first()
+    DB.clock+=120
+    const calls=mock.calls.length
+    const restored=await worker.fetch(req('/api/auth/session','POST',{widgetId},undefined,{Cookie:owner.browserCookie}),env)
+    assert.equal(restored.status,200)
+    assert.equal(restored.headers.get('Access-Control-Allow-Origin'),origin)
+    assert.equal(restored.headers.get('Access-Control-Allow-Credentials'),'true')
+    const value=await restored.json()
+    assert.notEqual(value.token,owner.session)
+    assert.equal(value.expiresIn,root.expires_at-DB.clock)
+    assert.equal(mock.calls.length,calls,'restore must not re-run OAuth or query Notion')
+    assert.deepEqual(await DB.prepare('SELECT * FROM browser_sessions WHERE token_hash=?').bind(root.token_hash).first(),root,'restoration does not renew the root')
+    const chart=await worker.fetch(req('/api/widgets/'+widgetId,'GET',undefined,value.token),env)
+    assert.equal(chart.status,200)
+    assert.equal((await chart.json()).result.data[0].value,42)
+    assert.equal((await worker.fetch(req('/api/auth/session','POST',{widgetId},undefined,{Cookie:other.browserCookie}),env)).status,403)
+    assert.equal((await worker.fetch(req('/api/auth/session','POST',{widgetId}),env)).status,401)
+    const otherRestore=await worker.fetch(req('/api/auth/session','POST',{},undefined,{Cookie:other.browserCookie}),env)
+    assert.equal(otherRestore.status,200)
+    assert.equal((await worker.fetch(req('/api/widgets/'+widgetId,'GET',undefined,(await otherRestore.json()).token),env)).status,404)
+    assert.equal((await worker.fetch(req('/api/auth/logout','POST',{},value.token),env)).status,200)
+    assert.equal((await worker.fetch(req('/api/widgets/'+widgetId,'GET',undefined,value.token),env)).status,401)
+    assert.equal((await worker.fetch(req('/api/auth/session','POST',{widgetId},undefined,{Cookie:owner.browserCookie}),env)).status,401)
+  }finally{mock.restore();DB.close()}
+})
+
+test('automatic restoration rejects missing/cross-site origins and simple form posts before issuing credentials',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),before=await sessionCount(DB)
+    for(const caller of [null,'null','https://evil.example','https://worker.example']){
+      const headers={'Content-Type':'application/json',Cookie:owner.browserCookie,...(caller===null?{}:{Origin:caller})}
+      const response=await worker.fetch(new Request('https://worker.example/api/auth/session',{method:'POST',headers,body:'{}'}),env)
+      assert.equal(response.status,403)
+      assert.equal(response.headers.get('Access-Control-Allow-Origin'),null)
+      const preflight=await worker.fetch(new Request('https://worker.example/api/auth/session',{method:'OPTIONS',headers}),env)
+      assert.equal(preflight.status,403)
+    }
+    for(const contentType of ['text/plain','application/x-www-form-urlencoded']){
+      const response=await worker.fetch(new Request('https://worker.example/api/auth/session',{method:'POST',headers:{Origin:origin,Cookie:owner.browserCookie,'Content-Type':contentType},body:'{}'}),env)
+      assert.equal(response.status,400)
+    }
+    assert.equal((await worker.fetch(req('/api/auth/session','POST',{widgetId:'invalid'},undefined,{Cookie:owner.browserCookie}),env)).status,400)
+    assert.equal(await sessionCount(DB),before)
+    const allowed=await worker.fetch(req('/api/auth/session','OPTIONS'),env)
+    assert.equal(allowed.status,204)
+    assert.equal(allowed.headers.get('Access-Control-Allow-Origin'),origin)
+    assert.equal(allowed.headers.get('Access-Control-Allow-Credentials'),'true')
+    assert.equal((await worker.fetch(req('/api/health'),env)).headers.get('Access-Control-Allow-Credentials'),null,'normal APIs do not opt into cookies')
+  }finally{mock.restore();DB.close()}
+})
+
+test('cookie restoration atomically rechecks revocation, expiry and ownership at issuance',async t=>{
+  for(const scenario of ['revoked','expired','widget-owner','root-owner']){
+    await t.test(scenario,async()=>{
+      const DB=database(),env=mockEnv(DB),mock=notionMock()
+      try{
+        const owner=await login(env),widgetId=await save(env,owner.session)
+        await login(env,'user-B')
+        const root=await rootHash(owner),before=await sessionCount(DB)
+        DB.beforeQuery=async sql=>{
+          if(!sql.startsWith('INSERT INTO sessions('))return
+          DB.beforeQuery=null
+          if(scenario==='revoked')await DB.prepare('DELETE FROM browser_sessions WHERE token_hash=?').bind(root).run()
+          if(scenario==='expired')DB.clock+=7200
+          if(scenario==='widget-owner')await DB.prepare('UPDATE widgets SET user_id=? WHERE id=?').bind('user-B',widgetId).run()
+          if(scenario==='root-owner')await DB.prepare('UPDATE browser_sessions SET user_id=? WHERE token_hash=?').bind('user-B',root).run()
+        }
+        assert.equal((await worker.fetch(req('/api/auth/session','POST',{widgetId},undefined,{Cookie:owner.browserCookie}),env)).status,401)
+        assert.equal(await sessionCount(DB),before,'failed restoration cannot leave an issued bearer')
+      }finally{mock.restore();DB.close()}
+    })
+  }
+})
+
+test('explicit reuse upgrades an old root cookie for cross-site restore without extending its lifetime',async()=>{
+  const DB=database(),env=mockEnv(DB),mock=notionMock()
+  try{
+    const owner=await login(env),root=await rootHash(owner),expires=DB.clock+60
+    await DB.prepare('UPDATE browser_sessions SET expires_at=? WHERE token_hash=?').bind(expires,root).run()
+    const flow=await handoff(env,undefined,true),page=await consent(env,flow,owner.browserCookie)
+    const response=await reuse(env,flow,owner.browserCookie,page.csrf),cookie=response.headers.get('Set-Cookie')
+    assert.equal(response.status,302)
+    assert.ok(cookie.startsWith(owner.browserCookie+';'))
+    assert.ok(cookie.includes('SameSite=None')&&cookie.includes('Secure')&&cookie.includes('HttpOnly'))
+    assert.ok(Number(cookie.match(/Max-Age=(\d+)/)[1])<=60)
+    assert.equal((await DB.prepare('SELECT expires_at FROM browser_sessions WHERE token_hash=?').bind(root).first()).expires_at,expires)
   }finally{mock.restore();DB.close()}
 })
